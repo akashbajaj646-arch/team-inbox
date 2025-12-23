@@ -1,0 +1,406 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Lora:wght@400;500&family=Nunito+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Background colors */
+  --bg-primary: #F5F0E6;
+  --bg-surface: #FFFDF8;
+  --bg-surface-alt: #FAF7F2;
+  --bg-hover: #F5F0E6;
+  
+  /* Border colors */
+  --border-strong: #D4C9BA;
+  --border-medium: #E5DDD0;
+  --border-light: #EDE8E0;
+  
+  /* Text colors */
+  --text-primary: #3D2C1F;
+  --text-secondary: #5D4E40;
+  --text-muted: #6B5C4D;
+  --text-faint: #8A7B6C;
+  --text-placeholder: #A99C8D;
+  
+  /* Accent colors */
+  --accent-primary: #C9594A;
+  --accent-primary-hover: #B8493A;
+  --accent-primary-light: #E07A6C;
+  --accent-secondary: #6B8E9F;
+  --accent-secondary-light: #8AACBB;
+  
+  /* Status colors */
+  --status-success: #7B9F6B;
+  --status-warning: #D4A84B;
+  --status-error: #C9594A;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(61, 44, 31, 0.08);
+  --shadow-md: 0 3px 10px rgba(61, 44, 31, 0.1);
+  --shadow-lg: 0 5px 20px rgba(61, 44, 31, 0.12);
+  --shadow-accent: 0 3px 10px rgba(201, 89, 74, 0.25);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Nunito Sans', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Background texture - subtle paper grain */
+.bg-texture {
+  background-color: var(--bg-primary);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
+/* Typography */
+.font-display {
+  font-family: 'Fraunces', serif;
+}
+
+.font-body {
+  font-family: 'Lora', serif;
+}
+
+.font-ui {
+  font-family: 'Nunito Sans', sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface-alt);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+/* Focus styles */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Button base styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-primary-light));
+  color: white;
+  border-color: var(--accent-primary-hover);
+  box-shadow: var(--shadow-accent);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 15px rgba(201, 89, 74, 0.35);
+}
+
+.btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-color: var(--border-medium);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* Input styles */
+.input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 15px;
+  font-family: 'Nunito Sans', sans-serif;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(201, 89, 74, 0.1);
+}
+
+/* Card styles */
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-medium);
+  background: var(--bg-surface);
+}
+
+.card-body {
+  padding: 20px;
+}
+
+/* Avatar styles */
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 600;
+  color: white;
+  border: 2px solid var(--border-medium);
+}
+
+.avatar-sm {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.avatar-md {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
+
+.avatar-lg {
+  width: 48px;
+  height: 48px;
+  font-size: 16px;
+}
+
+.avatar-blue {
+  background: linear-gradient(135deg, var(--accent-secondary), var(--accent-secondary-light));
+}
+
+.avatar-red {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-primary-light));
+}
+
+.avatar-green {
+  background: linear-gradient(135deg, #7B9F6B, #9ABB8A);
+}
+
+.avatar-brown {
+  background: linear-gradient(135deg, #9F7B6B, #BB9A8A);
+}
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+}
+
+.badge-primary {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.badge-secondary {
+  background: var(--accent-secondary);
+  color: white;
+}
+
+.badge-muted {
+  background: var(--border-medium);
+  color: var(--text-muted);
+}
+
+/* Presence indicator */
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Typing indicator */
+.typing-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: typing 1.4s infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+
+/* Transitions */
+.transition-fast {
+  transition: all 0.1s ease;
+}
+
+.transition-normal {
+  transition: all 0.15s ease;
+}
+
+.transition-slow {
+  transition: all 0.25s ease;
+}
+
+/* Email body prose styles - render email HTML as intended with reasonable limits */
+.email-prose {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333;
+  overflow-x: auto;
+}
+
+/* Reset Tailwind's aggressive resets inside email content */
+.email-prose *,
+.email-prose *::before,
+.email-prose *::after {
+  all: revert;
+  box-sizing: border-box;
+}
+
+/* Constrain images that don't have explicit dimensions */
+.email-prose img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* But respect explicit width/height attributes when present */
+.email-prose img[width] {
+  max-width: none;
+  width: attr(width px);
+}
+
+/* Ensure tables don't overflow */
+.email-prose table {
+  max-width: 100%;
+}
+
+/* Links */
+.email-prose a {
+  color: #1a73e8;
+  text-decoration: underline;
+}
+
+/* Blockquotes for replies */
+.email-prose blockquote {
+  border-left: 3px solid #ccc;
+  padding-left: 16px;
+  margin: 14px 0;
+  color: #666;
+}
+
+/* Rich text editor styles */
+.ProseMirror {
+  min-height: 100px;
+  padding: 16px;
+  font-family: 'Lora', serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.ProseMirror:focus {
+  outline: none;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--text-placeholder);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 24px;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.ProseMirror blockquote {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 16px;
+  margin-left: 0;
+  color: var(--text-muted);
+}
+
+.ProseMirror a {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}

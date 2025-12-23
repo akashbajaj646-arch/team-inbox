@@ -1,0 +1,593 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import type { EmailThread, EmailMessage, ThreadPresence, User, Template } from '@/types';
+import CommentSection from './CommentSection';
+import TemplatePicker from './TemplatePicker';
+import RichTextEditor from './RichTextEditor';
+
+interface Attachment {
+  file: File;
+  name: string;
+  size: number;
+  type: string;
+}
+
+interface ThreadViewProps {
+  threadId: string;
+  currentUser: User;
+}
+
+export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
+  const [thread, setThread] = useState<EmailThread | null>(null);
+  const [messages, setMessages] = useState<EmailMessage[]>([]);
+  const [presence, setPresence] = useState<ThreadPresence[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [replyBody, setReplyBody] = useState('');
+  const [sending, setSending] = useState(false);
+  const [showComposer, setShowComposer] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [showCcBcc, setShowCcBcc] = useState(false);
+  const [ccField, setCcField] = useState('');
+  const [bccField, setBccField] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const supabase = createClient();
+
+  useEffect(() => {
+    loadThread();
+    updatePresence('viewing');
+
+    const messageChannel = supabase
+      .channel(`messages:${threadId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'email_messages',
+          filter: `thread_id=eq.${threadId}`,
+        },
+        () => {
+          loadMessages();
+        }
+      )
+      .subscribe();
+
+    const presenceChannel = supabase
+      .channel(`presence:${threadId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'thread_presence',
+          filter: `thread_id=eq.${threadId}`,
+        },
+        () => {
+          loadPresence();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearPresence();
+      supabase.removeChannel(messageChannel);
+      supabase.removeChannel(presenceChannel);
+    };
+  }, [threadId]);
+
+  useEffect(() => {
+    if (showComposer && replyBody.length > 0) {
+      updatePresence('drafting');
+    } else if (showComposer) {
+      updatePresence('viewing');
+    }
+  }, [showComposer, replyBody]);
+
+  async function loadThread() {
+    setLoading(true);
+
+    const { data: threadData } = await supabase
+      .from('email_threads')
+      .select('*')
+      .eq('id', threadId)
+      .single();
+
+    setThread(threadData);
+    await loadMessages();
+    await loadPresence();
+    setLoading(false);
+  }
+
+  async function loadMessages() {
+    const { data } = await supabase
+      .from('email_messages')
+      .select('*')
+      .eq('thread_id', threadId)
+      .order('sent_at', { ascending: true });
+
+    setMessages(data || []);
+  }
+
+  async function loadPresence() {
+    const { data } = await supabase
+      .from('thread_presence')
+      .select(`
+        *,
+        user:users(id, name, email, avatar_url)
+      `)
+      .eq('thread_id', threadId)
+      .neq('user_id', currentUser.id);
+
+    setPresence(data || []);
+  }
+
+  async function updatePresence(status: 'viewing' | 'drafting') {
+    await fetch('/api/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId, status }),
+    });
+  }
+
+  async function clearPresence() {
+    await fetch(`/api/presence?threadId=${threadId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async function handleSend() {
+    if (!replyBody.trim() || replyBody === '<p></p>') return;
+
+    setSending(true);
+
+    try {
+      // Upload attachments first
+      const uploadedAttachments: { filename: string; mimeType: string; data: string }[] = [];
+      
+      for (const attachment of attachments) {
+        const base64 = await fileToBase64(attachment.file);
+        uploadedAttachments.push({
+          filename: attachment.name,
+          mimeType: attachment.type,
+          data: base64,
+        });
+      }
+
+      const response = await fetch('/api/emails/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId,
+          body: replyBody,
+          attachments: uploadedAttachments,
+          cc: ccField.trim() || undefined,
+          bcc: bccField.trim() || undefined,
+        }),
+      });
+
+      if (response.ok) {
+        setReplyBody('');
+        setAttachments([]);
+        setCcField('');
+        setBccField('');
+        setShowCcBcc(false);
+        setShowComposer(false);
+        await loadMessages();
+      }
+    } catch (err) {
+      console.error('Send error:', err);
+    }
+
+    setSending(false);
+  }
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove the data URL prefix (e.g., "data:image/png;base64,")
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newAttachments: Attachment[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // Limit file size to 10MB
+      if (file.size > 10 * 1024 * 1024) {
+        alert(`File "${file.name}" is too large. Maximum size is 10MB.`);
+        continue;
+      }
+      newAttachments.push({
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      });
+    }
+
+    setAttachments([...attachments, ...newAttachments]);
+    
+    // Reset input so the same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments(attachments.filter((_, i) => i !== index));
+  }
+
+  async function handleAiAssist() {
+    if (!thread || messages.length === 0) return;
+    
+    setAiLoading(true);
+    setShowComposer(true);
+    
+    try {
+      // Get sender info from the first inbound message
+      const inboundMessage = messages.find(m => !m.is_outbound) || messages[0];
+      
+      const response = await fetch('/api/ai-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadSubject: thread.subject,
+          messages: messages.map(m => ({
+            is_outbound: m.is_outbound,
+            body_text: m.body_text,
+            body_html: m.body_html,
+            from_name: m.from_name,
+            from_address: m.from_address,
+            sent_at: m.sent_at
+          })),
+          senderEmail: inboundMessage.from_address,
+          senderName: inboundMessage.from_name
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.draft) {
+        // Convert plain text to HTML for the rich text editor
+        const htmlDraft = data.draft
+          .split('\n\n')
+          .map((p: string) => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+          .join('');
+        setReplyBody(htmlDraft);
+      } else if (data.error) {
+        console.error('AI Assist error:', data.error);
+        alert('Failed to generate AI draft. Please try again.');
+      }
+    } catch (error) {
+      console.error('AI Assist error:', error);
+      alert('Failed to generate AI draft. Please try again.');
+    }
+    
+    setAiLoading(false);
+  }
+
+  function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function handleTemplateSelect(template: Template) {
+    setReplyBody(template.body);
+    if (!showComposer) {
+      setShowComposer(true);
+    }
+  }
+
+  function formatDate(dateString: string) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString([], {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-analog-text-muted bg-analog-surface">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!thread) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-analog-text-muted bg-analog-surface">
+        Email not found
+      </div>
+    );
+  }
+
+  const drafting = presence.filter((p) => p.status === 'drafting');
+  const viewing = presence.filter((p) => p.status === 'viewing');
+
+  return (
+    <div className="flex-1 flex flex-col h-screen bg-analog-surface">
+      {/* Header */}
+      <div className="px-8 py-5 border-b-2 border-analog-border-strong bg-analog-surface">
+        <h2 className="font-display text-2xl font-medium text-analog-text mb-4">
+          {thread.subject || '(No subject)'}
+        </h2>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 flex-1">
+            <div className="avatar avatar-lg avatar-blue font-display">
+              {messages[messages.length - 1]?.from_name?.charAt(0) || 
+               messages[messages.length - 1]?.from_address?.charAt(0) || '?'}
+            </div>
+            <div>
+              <p className="font-semibold text-[15px] text-analog-text">
+                {messages[messages.length - 1]?.from_name || messages[messages.length - 1]?.from_address}
+              </p>
+              <p className="text-[13px] text-analog-text-faint">
+                {messages[messages.length - 1]?.from_address}
+              </p>
+            </div>
+          </div>
+
+          {/* Presence Badge */}
+          {(drafting.length > 0 || viewing.length > 0) && (
+            <div className="flex items-center gap-2 px-3.5 py-2 bg-analog-hover border border-analog-border rounded-lg">
+              <div 
+                className="presence-dot"
+                style={{ background: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}
+              />
+              <span className="text-xs font-medium" style={{ color: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}>
+                {drafting.length > 0
+                  ? `${drafting.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is drafting`
+                  : `${viewing.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is viewing`}
+              </span>
+            </div>
+          )}
+
+          {/* Open in New Window Button */}
+          <button
+            onClick={() => window.open(`/email/${threadId}`, '_blank', 'noopener,noreferrer')}
+            className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150"
+            title="Open in new window"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-8 py-6">
+        <div className="max-w-4xl space-y-5">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`bg-analog-surface-alt border rounded-lg overflow-hidden ${
+                message.is_outbound
+                  ? 'border-analog-accent border-l-4'
+                  : 'border-analog-border'
+              }`}
+            >
+              {/* Message Header */}
+              <div className={`px-5 py-4 border-b border-analog-border flex items-center gap-3 ${
+                message.is_outbound ? 'bg-[#FDF8F7]' : 'bg-analog-surface'
+              }`}>
+                <div className={`avatar avatar-md font-display ${
+                  message.is_outbound ? 'avatar-red' : 'avatar-blue'
+                }`}>
+                  {(message.from_name || message.from_address).charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-sm text-analog-text">
+                    {message.from_name || message.from_address}
+                    {message.is_outbound && (
+                      <span className="ml-2 text-xs text-analog-accent font-normal">(You)</span>
+                    )}
+                  </p>
+                </div>
+                <span className="text-xs text-analog-text-placeholder">
+                  {formatDate(message.sent_at)}
+                </span>
+              </div>
+
+              {/* Message Body */}
+              <div className="px-5 py-5 overflow-x-auto">
+                {message.body_html ? (
+                  <div
+                    className="email-prose"
+                    dangerouslySetInnerHTML={{ __html: message.body_html }}
+                  />
+                ) : (
+                  <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
+                    {message.body_text}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Team Discussion */}
+        <div className="max-w-4xl mt-8 pt-6 border-t-2 border-analog-border-strong">
+          <CommentSection threadId={threadId} currentUser={currentUser} />
+        </div>
+      </div>
+
+      {/* Composer */}
+      <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-8 py-5">
+        {!showComposer ? (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowComposer(true)}
+              className="flex-1 px-5 py-3.5 bg-analog-surface border border-analog-border rounded-lg text-analog-text-placeholder text-left hover:border-analog-accent transition-all duration-150"
+            >
+              Write a reply...
+            </button>
+            <button
+              onClick={handleAiAssist}
+              disabled={aiLoading}
+              className="px-4 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-all duration-150 flex items-center gap-2 disabled:opacity-50"
+            >
+              {aiLoading ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Drafting...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                  </svg>
+                  AI Assist
+                </>
+              )}
+            </button>
+            {thread && (
+              <TemplatePicker
+                inboxId={thread.inbox_id}
+                onSelect={handleTemplateSelect}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* CC/BCC Toggle and Fields */}
+            <div className="space-y-2">
+              {!showCcBcc ? (
+                <button
+                  onClick={() => setShowCcBcc(true)}
+                  className="text-sm text-analog-accent hover:underline"
+                >
+                  Add Cc/Bcc
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-analog-text-muted w-10">Cc:</label>
+                    <input
+                      type="text"
+                      value={ccField}
+                      onChange={(e) => setCcField(e.target.value)}
+                      placeholder="email@example.com, another@example.com"
+                      className="input flex-1 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-analog-text-muted w-10">Bcc:</label>
+                    <input
+                      type="text"
+                      value={bccField}
+                      onChange={(e) => setBccField(e.target.value)}
+                      placeholder="email@example.com, another@example.com"
+                      className="input flex-1 py-2 text-sm"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <RichTextEditor
+              content={replyBody}
+              onChange={setReplyBody}
+              placeholder="Write your reply..."
+            />
+
+            {/* Attachments List */}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {attachments.map((attachment, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg text-sm"
+                  >
+                    <svg className="w-4 h-4 text-analog-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    <span className="text-analog-text truncate max-w-[150px]">{attachment.name}</span>
+                    <span className="text-analog-text-faint">({formatFileSize(attachment.size)})</span>
+                    <button
+                      onClick={() => removeAttachment(index)}
+                      className="p-0.5 text-analog-text-muted hover:text-analog-error transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setShowComposer(false);
+                    setReplyBody('');
+                    setAttachments([]);
+                  }}
+                  className="px-4 py-2 text-analog-text-muted hover:text-analog-text transition-colors"
+                >
+                  Cancel
+                </button>
+                
+                {/* Attachment Button */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  multiple
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="btn btn-secondary"
+                  title="Add attachment"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                  Attach
+                </button>
+
+                {thread && (
+                  <TemplatePicker
+                    inboxId={thread.inbox_id}
+                    onSelect={handleTemplateSelect}
+                  />
+                )}
+              </div>
+              <button
+                onClick={handleSend}
+                disabled={!replyBody.trim() || replyBody === '<p></p>' || sending}
+                className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              >
+                {sending ? 'Sending...' : 'Send Reply'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
