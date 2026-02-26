@@ -128,6 +128,9 @@ export async function POST(request: Request) {
         threadsCreated++;
       }
 
+      // Skip if thread is still null after creation attempt
+      if (!thread) continue;
+
       // Insert the message
       const { data: newMessage, error: messageError } = await serviceSupabase
         .from('sms_messages')
