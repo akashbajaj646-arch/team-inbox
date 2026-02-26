@@ -37,7 +37,7 @@ export default function Sidebar({
 
   useEffect(() => {
     if (selectedInboxId && selectedFilteredInboxId) {
-      setExpandedInboxes(prev => new Set([...prev, selectedInboxId]));
+      setExpandedInboxes(prev => new Set(Array.from(prev).concat(selectedInboxId)));
     }
   }, [selectedInboxId, selectedFilteredInboxId]);
 
