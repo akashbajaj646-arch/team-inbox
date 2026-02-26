@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
-// GET: Get messages for a thread
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -13,13 +14,11 @@ export async function GET(request: Request) {
 
     const supabase = await createClient();
 
-    // Verify user has access
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get thread to verify access
     const { data: thread } = await supabase
       .from('sms_threads')
       .select('inbox_id')
@@ -41,7 +40,6 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Get messages with attachments
     const { data: messages, error } = await supabase
       .from('sms_messages')
       .select(`

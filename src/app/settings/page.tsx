@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { User, Inbox } from '@/types';
@@ -13,7 +13,7 @@ import ContactsManager from '@/components/ContactsManager';
 
 export const dynamic = 'force-dynamic';
 
-export default function SettingsPage() {
+function SettingsContent() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
   const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
@@ -25,7 +25,6 @@ export default function SettingsPage() {
   const supabase = createClient();
 
   useEffect(() => {
-    // Check for tab query param
     const tab = searchParams.get('tab');
     if (tab === 'sms') {
       setActiveTab('sms');
@@ -37,7 +36,7 @@ export default function SettingsPage() {
 
   async function loadData() {
     const { data: { user: authUser } } = await supabase.auth.getUser();
-    
+
     if (!authUser) {
       router.push('/login');
       return;
@@ -71,7 +70,7 @@ export default function SettingsPage() {
         .order('name');
 
       setInboxes(inboxData || []);
-      
+
       if (inboxData?.length) {
         setSelectedInboxId(inboxData[0].id);
       }
@@ -88,9 +87,7 @@ export default function SettingsPage() {
     );
   }
 
-  if (!currentUser) {
-    return null;
-  }
+  if (!currentUser) return null;
 
   const selectedInbox = inboxes.find(i => i.id === selectedInboxId);
   const isAdmin = selectedInboxId ? userRoles[selectedInboxId] === 'admin' : false;
@@ -111,7 +108,7 @@ export default function SettingsPage() {
           </button>
           <h1 className="font-display text-xl font-medium text-analog-text">Settings</h1>
         </div>
-        
+
         {/* Tabs */}
         <div className="max-w-5xl mx-auto px-6">
           <div className="flex gap-8">
@@ -166,14 +163,13 @@ export default function SettingsPage() {
           <ContactsManager currentUser={currentUser} />
         ) : activeTab === 'sms' ? (
           <div className="max-w-xl">
-            <TwilioSettings 
-              currentUser={currentUser} 
+            <TwilioSettings
+              currentUser={currentUser}
               onInboxCreated={loadData}
             />
           </div>
         ) : activeTab === 'inboxes' ? (
           <div className="flex gap-8">
-            {/* Inbox Selector */}
             <div className="w-64 flex-shrink-0">
               <div className="text-[11px] uppercase tracking-wider text-analog-text-faint font-semibold mb-3">
                 Inboxes
@@ -209,12 +205,11 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Main Content */}
             <div className="flex-1 space-y-8">
               {selectedInbox ? (
                 <>
-                  <InboxSettings 
-                    inbox={selectedInbox} 
+                  <InboxSettings
+                    inbox={selectedInbox}
                     currentUser={currentUser}
                     isAdmin={isAdmin}
                     onUpdate={loadData}
@@ -242,5 +237,17 @@ export default function SettingsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-texture">
+        <div className="text-analog-text-muted font-medium">Loading...</div>
+      </div>
+    }>
+      <SettingsContent />
+    </Suspense>
   );
 }
