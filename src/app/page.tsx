@@ -9,6 +9,7 @@ import ThreadList from '@/components/ThreadList';
 import ThreadView from '@/components/ThreadView';
 import SmsThreadList from '@/components/SmsThreadList';
 import SmsThreadView from '@/components/SmsThreadView';
+import ComposeModal from '@/components/ComposeModal';
 
 export default function HomePage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -17,6 +18,7 @@ export default function HomePage() {
   const [selectedFilteredInbox, setSelectedFilteredInbox] = useState<FilteredInbox | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [selectedInbox, setSelectedInbox] = useState<Inbox | null>(null);
+  const [showCompose, setShowCompose] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const supabase = createClient();
@@ -41,7 +43,7 @@ export default function HomePage() {
 
   async function checkAuth() {
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) {
       router.push('/login');
       return;
@@ -98,6 +100,7 @@ export default function HomePage() {
   function handleSelectInbox(inboxId: string, filteredInboxId?: string | null) {
     setSelectedInboxId(inboxId);
     setSelectedFilteredInboxId(filteredInboxId || null);
+    setShowCompose(false);
   }
 
   async function handleSignOut() {
@@ -120,11 +123,11 @@ export default function HomePage() {
     );
   }
 
-  if (!currentUser) {
-    return null;
-  }
+  if (!currentUser) return null;
 
   const isSmsInbox = selectedInbox?.inbox_type === 'sms';
+  const isWhatsAppInbox = selectedInbox?.inbox_type === 'whatsapp';
+  const isMessagingInbox = isSmsInbox || isWhatsAppInbox;
 
   return (
     <div className="flex h-screen bg-texture">
@@ -134,19 +137,18 @@ export default function HomePage() {
         selectedFilteredInboxId={selectedFilteredInboxId}
         onSelectInbox={handleSelectInbox}
         onSignOut={handleSignOut}
+        onCompose={() => setShowCompose(true)}
       />
 
       {selectedInbox ? (
         <>
-          {isSmsInbox ? (
-            // SMS Inbox
+          {isMessagingInbox ? (
             <>
               <SmsThreadList
                 inbox={selectedInbox}
                 selectedThreadId={selectedThreadId}
                 onSelectThread={setSelectedThreadId}
               />
-
               {selectedThreadId ? (
                 <SmsThreadView
                   threadId={selectedThreadId}
@@ -154,20 +156,13 @@ export default function HomePage() {
                   currentUser={currentUser}
                 />
               ) : (
-                <div className="flex-1 flex items-center justify-center bg-analog-surface">
-                  <div className="text-center">
-                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-analog-surface-alt flex items-center justify-center border-2 border-analog-border">
-                      <svg className="w-10 h-10 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                      </svg>
-                    </div>
-                    <p className="text-analog-text-muted font-medium">Select a conversation to view</p>
-                  </div>
-                </div>
+                <EmptyPane
+                  icon="chat"
+                  label={`Select a ${isWhatsAppInbox ? 'WhatsApp' : 'SMS'} conversation to view`}
+                />
               )}
             </>
           ) : (
-            // Email Inbox
             <>
               <ThreadList
                 inbox={selectedInbox}
@@ -175,23 +170,13 @@ export default function HomePage() {
                 selectedThreadId={selectedThreadId}
                 onSelectThread={setSelectedThreadId}
               />
-
               {selectedThreadId ? (
                 <ThreadView
                   threadId={selectedThreadId}
                   currentUser={currentUser}
                 />
               ) : (
-                <div className="flex-1 flex items-center justify-center bg-analog-surface">
-                  <div className="text-center">
-                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-analog-surface-alt flex items-center justify-center border-2 border-analog-border">
-                      <svg className="w-10 h-10 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <p className="text-analog-text-muted font-medium">Select an email to view</p>
-                  </div>
-                </div>
+                <EmptyPane icon="email" label="Select an email to view" />
               )}
             </>
           )}
@@ -205,21 +190,49 @@ export default function HomePage() {
               </svg>
             </div>
             <h2 className="font-display text-xl font-medium text-analog-text mb-2">No inbox selected</h2>
-            <p className="text-analog-text-muted mb-6">Connect a Gmail account or Twilio SMS to get started with your team inbox.</p>
+            <p className="text-analog-text-muted mb-6">Connect a Gmail account or Twilio SMS to get started.</p>
             <div className="flex gap-3 justify-center">
-              <a
-                href="/api/auth/google"
-                className="btn btn-primary"
-              >
+              <a href="/api/auth/google?personal=true" className="btn btn-primary">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
-                Connect Gmail
+                Connect My Gmail
               </a>
             </div>
           </div>
         </div>
       )}
+
+      {/* Compose Modal */}
+      {showCompose && selectedInbox && currentUser && (
+        <ComposeModal
+          inbox={selectedInbox}
+          currentUser={currentUser}
+          onClose={() => setShowCompose(false)}
+          onSent={() => setShowCompose(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EmptyPane({ icon, label }: { icon: 'email' | 'chat'; label: string }) {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-analog-surface">
+      <div className="text-center">
+        <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-analog-surface-alt flex items-center justify-center border-2 border-analog-border">
+          {icon === 'email' ? (
+            <svg className="w-10 h-10 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          ) : (
+            <svg className="w-10 h-10 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+          )}
+        </div>
+        <p className="text-analog-text-muted font-medium">{label}</p>
+      </div>
     </div>
   );
 }

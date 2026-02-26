@@ -14,10 +14,13 @@ export interface Inbox {
   email_address: string | null;
   google_refresh_token: string | null;
   google_history_id: string | null;
-  inbox_type: 'email' | 'sms';
+  inbox_type: 'email' | 'sms' | 'whatsapp';
   twilio_phone_number: string | null;
   twilio_account_sid: string | null;
   twilio_auth_token: string | null;
+  // Personal inbox fields
+  is_personal: boolean;
+  owner_user_id: string | null;
   created_at: string;
 }
 

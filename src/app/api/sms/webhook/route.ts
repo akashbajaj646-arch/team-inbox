@@ -1,22 +1,35 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import twilio from 'twilio';
 
-// Twilio sends webhooks as form data
+/**
+ * Twilio Webhook — handles both inbound SMS and WhatsApp messages.
+ *
+ * WhatsApp messages from Twilio arrive with:
+ *   From: whatsapp:+1234567890
+ *   To:   whatsapp:+0987654321
+ *
+ * We strip the "whatsapp:" prefix to find the inbox by phone number,
+ * then route to the correct inbox_type ('sms' or 'whatsapp').
+ */
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    
-    // Extract Twilio webhook data
+
     const messageSid = formData.get('MessageSid') as string;
-    const from = formData.get('From') as string;
-    const to = formData.get('To') as string;
+    const fromRaw = formData.get('From') as string;
+    const toRaw = formData.get('To') as string;
     const body = formData.get('Body') as string;
     const numMedia = parseInt(formData.get('NumMedia') as string || '0');
-    
-    if (!messageSid || !from || !to) {
+
+    if (!messageSid || !fromRaw || !toRaw) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
+
+    // Detect WhatsApp vs SMS
+    const isWhatsApp = fromRaw.startsWith('whatsapp:') || toRaw.startsWith('whatsapp:');
+    const from = fromRaw.replace('whatsapp:', '');
+    const to = toRaw.replace('whatsapp:', '');
+    const expectedInboxType = isWhatsApp ? 'whatsapp' : 'sms';
 
     const supabase = await createServiceClient();
 
@@ -25,12 +38,15 @@ export async function POST(request: Request) {
       .from('inboxes')
       .select('*')
       .eq('twilio_phone_number', to)
-      .eq('inbox_type', 'sms')
+      .eq('inbox_type', expectedInboxType)
       .single();
 
     if (inboxError || !inbox) {
-      console.error('No inbox found for phone number:', to);
-      return NextResponse.json({ error: 'Inbox not found' }, { status: 404 });
+      console.error(`No ${expectedInboxType} inbox found for phone number:`, to);
+      return new Response(
+        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        { headers: { 'Content-Type': 'text/xml' } }
+      );
     }
 
     // Find or create thread for this contact
@@ -42,7 +58,6 @@ export async function POST(request: Request) {
       .single();
 
     if (!thread) {
-      // Create new thread
       const { data: newThread, error: threadError } = await supabase
         .from('sms_threads')
         .insert({
@@ -62,7 +77,6 @@ export async function POST(request: Request) {
       }
       thread = newThread;
     } else {
-      // Update existing thread
       await supabase
         .from('sms_threads')
         .update({
@@ -95,13 +109,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to create message' }, { status: 500 });
     }
 
-    // Handle MMS attachments
+    // Handle MMS / WhatsApp media attachments
     if (numMedia > 0 && message) {
       const attachments = [];
       for (let i = 0; i < numMedia; i++) {
         const mediaUrl = formData.get(`MediaUrl${i}`) as string;
         const contentType = formData.get(`MediaContentType${i}`) as string;
-        
         if (mediaUrl) {
           attachments.push({
             message_id: message.id,
@@ -112,31 +125,24 @@ export async function POST(request: Request) {
       }
 
       if (attachments.length > 0) {
-        const { error: attachmentError } = await supabase
-          .from('sms_attachments')
-          .insert(attachments);
-
-        if (attachmentError) {
-          console.error('Error saving attachments:', attachmentError);
-        }
+        await supabase.from('sms_attachments').insert(attachments);
       }
     }
 
-    // Return empty TwiML response (we don't auto-reply)
+    // Return empty TwiML (no auto-reply)
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-      {
-        headers: { 'Content-Type': 'text/xml' },
-      }
+      { headers: { 'Content-Type': 'text/xml' } }
     );
   } catch (err) {
     console.error('Webhook error:', err);
-    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
+    return new Response(
+      '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+      { headers: { 'Content-Type': 'text/xml' } }
+    );
   }
 }
 
-// Twilio also sends status callbacks - handle those
-export async function GET(request: Request) {
-  // Health check endpoint
+export async function GET() {
   return NextResponse.json({ status: 'ok', service: 'twilio-webhook' });
 }
