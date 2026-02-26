@@ -111,7 +111,10 @@ export default function SmsThreadList({
       }
     }
 
-    setContactNames(prev => new Map([...prev, ...newContactNames]));
+    setContactNames(prev => {
+      const merged = new Map(Array.from(prev.entries()).concat(Array.from(newContactNames.entries())));
+      return merged;
+    });
   }
 
   function formatContactDisplayName(contact: Contact): string {
@@ -200,7 +203,6 @@ export default function SmsThreadList({
   }
 
   function formatPhone(phone: string): string {
-    // Format US phone numbers nicely
     const cleaned = phone.replace(/\D/g, '');
     if (cleaned.length === 11 && cleaned.startsWith('1')) {
       return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
