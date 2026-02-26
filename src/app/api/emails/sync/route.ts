@@ -86,7 +86,7 @@ export async function POST(request: Request) {
           totalProcessed++;
         }
 
-        pageToken = nextPageToken;
+        pageToken = nextPageToken ?? undefined;
         pageCount++;
       } while (pageToken && pageCount < maxPages);
       
