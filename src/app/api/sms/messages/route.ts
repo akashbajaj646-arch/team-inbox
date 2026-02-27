@@ -44,7 +44,8 @@ export async function GET(request: Request) {
       .from('sms_messages')
       .select(`
         *,
-        attachments:sms_attachments(*)
+        attachments:sms_attachments(*),
+        sent_by:users(id, name, email, avatar_url)
       `)
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });

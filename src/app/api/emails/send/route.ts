@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { sendReply, getThread, parseHeaders, extractBody, parseEmailAddress } from '@/lib/gmail';
 
+export const dynamic = 'force-dynamic';
+
 interface AttachmentData {
   filename: string;
   mimeType: string;
@@ -132,7 +134,6 @@ export async function POST(request: Request) {
     );
 
     if (newMessage) {
-      const newHeaders = parseHeaders(newMessage.payload.headers);
       const newBody = extractBody(newMessage);
 
       await supabase.from('email_messages').insert({
@@ -146,6 +147,7 @@ export async function POST(request: Request) {
         body_text: newBody.text,
         sent_at: new Date().toISOString(),
         is_outbound: true,
+        sent_by_user_id: user.id,
       });
 
       // Update thread

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import twilio from 'twilio';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: Request) {
   try {
     const { threadId, body, mediaUrls } = await request.json();
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Get Twilio credentials from inbox (use service client to access encrypted tokens)
+    // Get Twilio credentials from inbox
     const { data: inbox } = await serviceSupabase
       .from('inboxes')
       .select('twilio_phone_number, twilio_account_sid, twilio_auth_token')
@@ -68,13 +70,8 @@ export async function POST(request: Request) {
       to: thread.contact_phone,
     };
 
-    if (body) {
-      messageOptions.body = body;
-    }
-
-    if (mediaUrls && mediaUrls.length > 0) {
-      messageOptions.mediaUrl = mediaUrls;
-    }
+    if (body) messageOptions.body = body;
+    if (mediaUrls && mediaUrls.length > 0) messageOptions.mediaUrl = mediaUrls;
 
     const twilioMessage = await twilioClient.messages.create(messageOptions);
 
@@ -90,6 +87,7 @@ export async function POST(request: Request) {
         body: body || null,
         status: twilioMessage.status,
         sent_at: new Date().toISOString(),
+        sent_by_user_id: user.id,
       })
       .select()
       .single();
@@ -104,9 +102,8 @@ export async function POST(request: Request) {
       const attachments = mediaUrls.map((url: string) => ({
         message_id: message.id,
         media_url: url,
-        content_type: null, // We don't know the content type for outbound
+        content_type: null,
       }));
-
       await supabase.from('sms_attachments').insert(attachments);
     }
 

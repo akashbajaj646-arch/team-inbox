@@ -15,6 +15,17 @@ interface Product {
   image_url: string | null;
 }
 
+interface SentByUser {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
+interface SmsMessageWithUser extends SmsMessage {
+  sent_by?: SentByUser | null;
+}
+
 interface SmsThreadViewProps {
   threadId: string;
   inbox: Inbox;
@@ -23,7 +34,7 @@ interface SmsThreadViewProps {
 
 export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThreadViewProps) {
   const [thread, setThread] = useState<SmsThread | null>(null);
-  const [messages, setMessages] = useState<SmsMessage[]>([]);
+  const [messages, setMessages] = useState<SmsMessageWithUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -32,7 +43,6 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   const [contactDisplayName, setContactDisplayName] = useState<string | null>(null);
   const [showSkuPicker, setShowSkuPicker] = useState(false);
   const [skuSearchQuery, setSkuSearchQuery] = useState('');
-  const [skuPickerPosition, setSkuPickerPosition] = useState({ top: 0, left: 0 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
@@ -42,7 +52,6 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
     loadMessages();
     markAsRead();
 
-    // Subscribe to new messages
     const channel = supabase
       .channel(`sms-messages:${threadId}`)
       .on(
@@ -82,26 +91,21 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
     if (data) {
       setThread(data);
       setContactName(data.contact_name || '');
-      // Look up contact by phone number
       lookupContact(data.contact_phone);
     }
   }
 
   async function lookupContact(phone: string) {
     if (!phone) return;
-    
     try {
       const response = await fetch(`/api/contacts?phone=${encodeURIComponent(phone)}`);
       const data = await response.json();
-      
       if (data.contact) {
         const contact = data.contact;
         const parts = [];
         if (contact.first_name) parts.push(contact.first_name);
         if (contact.last_name) parts.push(contact.last_name);
-        
         const name = parts.join(' ');
-        
         if (name && contact.company_name) {
           setContactDisplayName(`${name} (${contact.company_name})`);
         } else {
@@ -109,20 +113,15 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
         }
       }
     } catch (err) {
-      // Ignore errors
+      // Ignore
     }
   }
 
   async function loadMessages() {
     setLoading(true);
-
     const response = await fetch(`/api/sms/messages?threadId=${threadId}`);
     const data = await response.json();
-
-    if (data.messages) {
-      setMessages(data.messages);
-    }
-
+    if (data.messages) setMessages(data.messages);
     setLoading(false);
   }
 
@@ -136,16 +135,12 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
 
   async function handleSend() {
     if (!newMessage.trim() || sending) return;
-
     setSending(true);
 
     const response = await fetch('/api/sms/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        threadId,
-        body: newMessage.trim(),
-      }),
+      body: JSON.stringify({ threadId, body: newMessage.trim() }),
     });
 
     if (response.ok) {
@@ -165,7 +160,6 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ threadId, contact_name: contactName.trim() || null }),
     });
-
     setThread(prev => prev ? { ...prev, contact_name: contactName.trim() || null } : null);
     setEditingName(false);
   }
@@ -194,33 +188,41 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    }
-    if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
-    }
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-    });
+    if (date.toDateString() === today.toDateString()) return 'Today';
+    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+    return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   }
 
-  // Group messages by date
-  function groupMessagesByDate(messages: SmsMessage[]): Record<string, SmsMessage[]> {
-    const groups: Record<string, SmsMessage[]> = {};
-    
-    messages.forEach(msg => {
+  function groupMessagesByDate(msgs: SmsMessageWithUser[]): Record<string, SmsMessageWithUser[]> {
+    const groups: Record<string, SmsMessageWithUser[]> = {};
+    msgs.forEach(msg => {
       const dateKey = new Date(msg.sent_at).toDateString();
-      if (!groups[dateKey]) {
-        groups[dateKey] = [];
-      }
+      if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(msg);
     });
-    
     return groups;
+  }
+
+  function getInitials(name: string | null | undefined, email: string): string {
+    if (name) {
+      const parts = name.trim().split(' ');
+      if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      return parts[0][0].toUpperCase();
+    }
+    return email.charAt(0).toUpperCase();
+  }
+
+  const BUBBLE_COLORS = [
+    'bg-violet-500', 'bg-blue-500', 'bg-emerald-500',
+    'bg-orange-500', 'bg-pink-500', 'bg-teal-500',
+  ];
+
+  function getBubbleColor(userId: string): string {
+    let hash = 0;
+    for (let i = 0; i < userId.length; i++) {
+      hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return BUBBLE_COLORS[Math.abs(hash) % BUBBLE_COLORS.length];
   }
 
   if (!thread) {
@@ -254,12 +256,8 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   placeholder="Contact name"
                   autoFocus
                 />
-                <button onClick={handleUpdateName} className="text-analog-accent text-sm font-medium">
-                  Save
-                </button>
-                <button onClick={() => setEditingName(false)} className="text-analog-text-muted text-sm">
-                  Cancel
-                </button>
+                <button onClick={handleUpdateName} className="text-analog-accent text-sm font-medium">Save</button>
+                <button onClick={() => setEditingName(false)} className="text-analog-text-muted text-sm">Cancel</button>
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -306,12 +304,11 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   </div>
                 </div>
 
-                {/* Messages for this day */}
                 <div className="space-y-3">
                   {dayMessages.map((message) => (
                     <div
                       key={message.id}
-                      className={`flex ${message.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
+                      className={`flex flex-col ${message.direction === 'outbound' ? 'items-end' : 'items-start'}`}
                     >
                       <div
                         className={`max-w-[75%] rounded-2xl px-4 py-2 ${
@@ -320,29 +317,18 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                             : 'bg-analog-surface-alt border border-analog-border rounded-bl-md'
                         }`}
                       >
-                        {/* Message body */}
                         {message.body && (
                           <p className="text-sm whitespace-pre-wrap break-words">{message.body}</p>
                         )}
 
-                        {/* Attachments */}
                         {message.attachments && message.attachments.length > 0 && (
                           <div className="mt-2 space-y-2">
                             {message.attachments.map((attachment) => (
                               <div key={attachment.id}>
                                 {attachment.content_type?.startsWith('image/') ? (
-                                  <img
-                                    src={attachment.media_url}
-                                    alt="MMS attachment"
-                                    className="max-w-full rounded-lg"
-                                  />
+                                  <img src={attachment.media_url} alt="MMS attachment" className="max-w-full rounded-lg" />
                                 ) : (
-                                  <a
-                                    href={attachment.media_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-sm underline"
-                                  >
+                                  <a href={attachment.media_url} target="_blank" rel="noopener noreferrer" className="text-sm underline">
                                     View attachment
                                   </a>
                                 )}
@@ -351,7 +337,6 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                           </div>
                         )}
 
-                        {/* Timestamp */}
                         <p className={`text-xs mt-1 ${
                           message.direction === 'outbound' ? 'text-white/70' : 'text-analog-text-faint'
                         }`}>
@@ -361,6 +346,21 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                           )}
                         </p>
                       </div>
+
+                      {/* Reply bubble — who sent this outbound message */}
+                      {message.direction === 'outbound' && message.sent_by && (
+                        <div className="flex items-center gap-1.5 mt-1 mr-1">
+                          <div
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold ${getBubbleColor(message.sent_by.id)}`}
+                            title={message.sent_by.name || message.sent_by.email}
+                          >
+                            {getInitials(message.sent_by.name, message.sent_by.email)}
+                          </div>
+                          <span className="text-[11px] text-analog-text-faint">
+                            {message.sent_by.name?.split(' ')[0] || message.sent_by.email.split('@')[0]}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -372,10 +372,10 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
 
         {/* Team Discussion */}
         <div className="max-w-2xl mx-auto mt-8 pt-6 border-t-2 border-analog-border-strong">
-          <CommentSection 
+          <CommentSection
             threadId={null}
-            smsThreadId={threadId} 
-            currentUser={currentUser} 
+            smsThreadId={threadId}
+            currentUser={currentUser}
           />
         </div>
       </div>
@@ -397,9 +397,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                     e.preventDefault();
                     handleSend();
                   }
-                  if (e.key === 'Escape' && showSkuPicker) {
-                    setShowSkuPicker(false);
-                  }
+                  if (e.key === 'Escape' && showSkuPicker) setShowSkuPicker(false);
                 }}
                 placeholder="Type a message... (use /sku: to search products)"
                 rows={1}
@@ -454,14 +452,10 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   function handleSkuSelect(product: Product) {
     const productCatalogUrl = process.env.NEXT_PUBLIC_PRODUCT_CATALOG_URL || 'http://localhost:3002';
     const productLink = `${productCatalogUrl}/product/${product.style_number}`;
-    
-    // Replace /sku:query with just the product link
     const newText = newMessage.replace(/\/sku:\S*$/, productLink);
     setNewMessage(newText);
     setShowSkuPicker(false);
     setSkuSearchQuery('');
-    
-    // Focus back on textarea
     textareaRef.current?.focus();
   }
 }

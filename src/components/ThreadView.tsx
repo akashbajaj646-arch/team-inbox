@@ -14,6 +14,17 @@ interface Attachment {
   type: string;
 }
 
+interface SentByUser {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
+interface EmailMessageWithUser extends EmailMessage {
+  sent_by?: SentByUser | null;
+}
+
 interface ThreadViewProps {
   threadId: string;
   currentUser: User;
@@ -21,7 +32,7 @@ interface ThreadViewProps {
 
 export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [thread, setThread] = useState<EmailThread | null>(null);
-  const [messages, setMessages] = useState<EmailMessage[]>([]);
+  const [messages, setMessages] = useState<EmailMessageWithUser[]>([]);
   const [presence, setPresence] = useState<ThreadPresence[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyBody, setReplyBody] = useState('');
@@ -104,7 +115,10 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   async function loadMessages() {
     const { data } = await supabase
       .from('email_messages')
-      .select('*')
+      .select(`
+        *,
+        sent_by:users(id, name, email, avatar_url)
+      `)
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });
 
@@ -144,7 +158,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setSending(true);
 
     try {
-      // Upload attachments first
       const uploadedAttachments: { filename: string; mimeType: string; data: string }[] = [];
       
       for (const attachment of attachments) {
@@ -190,7 +203,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       reader.readAsDataURL(file);
       reader.onload = () => {
         const result = reader.result as string;
-        // Remove the data URL prefix (e.g., "data:image/png;base64,")
         const base64 = result.split(',')[1];
         resolve(base64);
       };
@@ -205,25 +217,15 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     const newAttachments: Attachment[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      // Limit file size to 10MB
       if (file.size > 10 * 1024 * 1024) {
         alert(`File "${file.name}" is too large. Maximum size is 10MB.`);
         continue;
       }
-      newAttachments.push({
-        file,
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      });
+      newAttachments.push({ file, name: file.name, size: file.size, type: file.type });
     }
 
     setAttachments([...attachments, ...newAttachments]);
-    
-    // Reset input so the same file can be selected again
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   function removeAttachment(index: number) {
@@ -237,7 +239,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setShowComposer(true);
     
     try {
-      // Get sender info from the first inbound message
       const inboundMessage = messages.find(m => !m.is_outbound) || messages[0];
       
       const response = await fetch('/api/ai-assist', {
@@ -261,18 +262,15 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       const data = await response.json();
       
       if (data.draft) {
-        // Convert plain text to HTML for the rich text editor
         const htmlDraft = data.draft
           .split('\n\n')
           .map((p: string) => `<p>${p.replace(/\n/g, '<br>')}</p>`)
           .join('');
         setReplyBody(htmlDraft);
       } else if (data.error) {
-        console.error('AI Assist error:', data.error);
         alert('Failed to generate AI draft. Please try again.');
       }
     } catch (error) {
-      console.error('AI Assist error:', error);
       alert('Failed to generate AI draft. Please try again.');
     }
     
@@ -287,9 +285,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
   function handleTemplateSelect(template: Template) {
     setReplyBody(template.body);
-    if (!showComposer) {
-      setShowComposer(true);
-    }
+    if (!showComposer) setShowComposer(true);
   }
 
   function formatDate(dateString: string) {
@@ -301,6 +297,30 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       hour: 'numeric',
       minute: '2-digit',
     });
+  }
+
+  // Get initials from a name or email
+  function getInitials(name: string | null | undefined, email: string): string {
+    if (name) {
+      const parts = name.trim().split(' ');
+      if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      return parts[0][0].toUpperCase();
+    }
+    return email.charAt(0).toUpperCase();
+  }
+
+  // Consistent color per user based on their ID
+  const BUBBLE_COLORS = [
+    'bg-violet-500', 'bg-blue-500', 'bg-emerald-500',
+    'bg-orange-500', 'bg-pink-500', 'bg-teal-500',
+  ];
+
+  function getBubbleColor(userId: string): string {
+    let hash = 0;
+    for (let i = 0; i < userId.length; i++) {
+      hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return BUBBLE_COLORS[Math.abs(hash) % BUBBLE_COLORS.length];
   }
 
   if (loading) {
@@ -360,7 +380,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
             </div>
           )}
 
-          {/* Open in New Window Button */}
+          {/* Open in New Window */}
           <button
             onClick={() => window.open(`/email/${threadId}`, '_blank', 'noopener,noreferrer')}
             className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150"
@@ -397,11 +417,24 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                 <div className="flex-1">
                   <p className="font-semibold text-sm text-analog-text">
                     {message.from_name || message.from_address}
-                    {message.is_outbound && (
-                      <span className="ml-2 text-xs text-analog-accent font-normal">(You)</span>
-                    )}
                   </p>
                 </div>
+
+                {/* Reply bubble — who on the team sent this */}
+                {message.is_outbound && message.sent_by && (
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getBubbleColor(message.sent_by.id)}`}
+                      title={message.sent_by.name || message.sent_by.email}
+                    >
+                      {getInitials(message.sent_by.name, message.sent_by.email)}
+                    </div>
+                    <span className="text-xs text-analog-text-muted">
+                      {message.sent_by.name?.split(' ')[0] || message.sent_by.email.split('@')[0]}
+                    </span>
+                  </div>
+                )}
+
                 <span className="text-xs text-analog-text-placeholder">
                   {formatDate(message.sent_at)}
                 </span>
@@ -471,7 +504,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
           </div>
         ) : (
           <div className="space-y-4">
-            {/* CC/BCC Toggle and Fields */}
             <div className="space-y-2">
               {!showCcBcc ? (
                 <button
@@ -512,7 +544,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
               placeholder="Write your reply..."
             />
 
-            {/* Attachments List */}
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {attachments.map((attachment, index) => (
@@ -551,7 +582,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   Cancel
                 </button>
                 
-                {/* Attachment Button */}
                 <input
                   type="file"
                   ref={fileInputRef}
