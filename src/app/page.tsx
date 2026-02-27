@@ -10,6 +10,7 @@ import ThreadView from '@/components/ThreadView';
 import SmsThreadList from '@/components/SmsThreadList';
 import SmsThreadView from '@/components/SmsThreadView';
 import ComposeModal from '@/components/ComposeModal';
+import AllInboxesView from '@/components/AllInboxesView';
 
 export default function HomePage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -19,6 +20,7 @@ export default function HomePage() {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [selectedInbox, setSelectedInbox] = useState<Inbox | null>(null);
   const [showCompose, setShowCompose] = useState(false);
+  const [showAllInboxes, setShowAllInboxes] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const supabase = createClient();
@@ -98,8 +100,18 @@ export default function HomePage() {
   }
 
   function handleSelectInbox(inboxId: string, filteredInboxId?: string | null) {
+    setShowAllInboxes(false);
     setSelectedInboxId(inboxId);
     setSelectedFilteredInboxId(filteredInboxId || null);
+    setShowCompose(false);
+  }
+
+  function handleSelectAllInboxes() {
+    setShowAllInboxes(true);
+    setSelectedInboxId(null);
+    setSelectedInbox(null);
+    setSelectedThreadId(null);
+    setSelectedFilteredInboxId(null);
     setShowCompose(false);
   }
 
@@ -135,12 +147,16 @@ export default function HomePage() {
         currentUser={currentUser}
         selectedInboxId={selectedInboxId}
         selectedFilteredInboxId={selectedFilteredInboxId}
+        showAllInboxes={showAllInboxes}
         onSelectInbox={handleSelectInbox}
+        onSelectAllInboxes={handleSelectAllInboxes}
         onSignOut={handleSignOut}
         onCompose={() => setShowCompose(true)}
       />
 
-      {selectedInbox ? (
+      {showAllInboxes ? (
+        <AllInboxesView currentUser={currentUser} />
+      ) : selectedInbox ? (
         <>
           {isMessagingInbox ? (
             <>

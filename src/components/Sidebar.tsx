@@ -13,7 +13,9 @@ interface SidebarProps {
   currentUser: User;
   selectedInboxId: string | null;
   selectedFilteredInboxId: string | null;
+  showAllInboxes?: boolean;
   onSelectInbox: (inboxId: string, filteredInboxId?: string | null) => void;
+  onSelectAllInboxes?: () => void;
   onSignOut: () => void;
   onCompose: () => void;
 }
@@ -22,7 +24,9 @@ export default function Sidebar({
   currentUser,
   selectedInboxId,
   selectedFilteredInboxId,
+  showAllInboxes = false,
   onSelectInbox,
+  onSelectAllInboxes,
   onSignOut,
   onCompose,
 }: SidebarProps) {
@@ -203,6 +207,21 @@ export default function Sidebar({
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           Compose
+        </button>
+
+        {/* All Inboxes Search */}
+        <button
+          onClick={onSelectAllInboxes}
+          className={`mt-2 w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+            showAllInboxes
+              ? 'bg-analog-accent/10 text-analog-accent border border-analog-accent/20'
+              : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text border border-transparent'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          Search All Inboxes
         </button>
       </div>
 
