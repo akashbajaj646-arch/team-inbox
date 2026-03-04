@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { Building2, Phone, Mail, Hash, MapPin, ExternalLink, Search, X, ChevronRight, User } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 interface Customer {
   id: string;
@@ -20,8 +21,8 @@ interface Customer {
 }
 
 interface CustomerCardProps {
-  email?: string;   // for email threads
-  phone?: string;   // for SMS threads
+  email?: string;
+  phone?: string;
 }
 
 const ADVANCE_HQ_URL = process.env.NEXT_PUBLIC_ADVANCE_HQ_URL || 'https://advance-hq.vercel.app';
@@ -34,6 +35,7 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
   const [searching, setSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const supabase = createClient();
 
   useEffect(() => {
     if (!email && !phone) {
@@ -46,13 +48,19 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
   async function lookupCustomer() {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (email) params.set('email', email);
-      else if (phone) params.set('phone', phone);
+      let query = supabase
+        .from('customers')
+        .select('id, customer_name, account_number, email, phone, city, state, country, status, category, credit_limit, is_active, am_customer_id');
 
-      const res = await fetch(`/api/customers/lookup?${params}`);
-      const data = await res.json();
-      setCustomer(data.customer || null);
+      if (email) {
+        query = query.ilike('email', email);
+      } else if (phone) {
+        const digitsOnly = phone.replace(/\D/g, '');
+        query = query.or(`phone.ilike.%${digitsOnly}%,phone.ilike.%${phone}%`);
+      }
+
+      const { data } = await query.maybeSingle();
+      setCustomer(data || null);
     } catch {
       setCustomer(null);
     } finally {
@@ -67,13 +75,13 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
     }
     setSearching(true);
     try {
-      const res = await fetch('/api/customers/lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
-      });
-      const data = await res.json();
-      setSearchResults(data.customers || []);
+      const { data } = await supabase
+        .from('customers')
+        .select('id, customer_name, account_number, email, phone, city, state, status')
+        .or(`customer_name.ilike.%${q}%,email.ilike.%${q}%,account_number.ilike.%${q}%`)
+        .limit(8);
+
+      setSearchResults(data || []);
     } catch {
       setSearchResults([]);
     } finally {
@@ -117,10 +125,7 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Customer</p>
           <button
-            onClick={() => {
-              setCustomer(null);
-              setShowSearch(true);
-            }}
+            onClick={() => { setCustomer(null); setShowSearch(true); }}
             className="text-xs text-stone-400 hover:text-stone-600 transition-colors"
           >
             Change
@@ -128,7 +133,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
         </div>
 
         <div className="bg-stone-50 rounded-xl p-3 space-y-2.5">
-          {/* Name + status */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-7 h-7 rounded-lg bg-[#c17f6b]/15 flex items-center justify-center flex-shrink-0">
@@ -145,7 +149,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
             )}
           </div>
 
-          {/* Account number */}
           {customer.account_number && (
             <div className="flex items-center gap-2 text-xs text-stone-500">
               <Hash size={11} className="flex-shrink-0" />
@@ -153,7 +156,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
             </div>
           )}
 
-          {/* Email */}
           {customer.email && (
             <div className="flex items-center gap-2 text-xs text-stone-500 min-w-0">
               <Mail size={11} className="flex-shrink-0" />
@@ -161,7 +163,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
             </div>
           )}
 
-          {/* Phone */}
           {customer.phone && (
             <div className="flex items-center gap-2 text-xs text-stone-500">
               <Phone size={11} className="flex-shrink-0" />
@@ -169,7 +170,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
             </div>
           )}
 
-          {/* Location */}
           {(customer.city || customer.state) && (
             <div className="flex items-center gap-2 text-xs text-stone-500">
               <MapPin size={11} className="flex-shrink-0" />
@@ -177,7 +177,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
             </div>
           )}
 
-          {/* Credit limit */}
           {customer.credit_limit && (
             <div className="flex items-center justify-between text-xs pt-1 border-t border-stone-200">
               <span className="text-stone-400">Credit limit</span>
@@ -186,7 +185,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
           )}
         </div>
 
-        {/* View in Advance HQ CTA */}
         <a
           href={`${ADVANCE_HQ_URL}/customers/${customer.id}`}
           target="_blank"
@@ -200,7 +198,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
     );
   }
 
-  // No match found — show link/search UI
   return (
     <div className="border-t border-stone-100 pt-4 mt-4">
       <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-3">Customer</p>
@@ -241,7 +238,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
             )}
           </div>
 
-          {/* Search results */}
           {searching && (
             <p className="text-xs text-stone-400 text-center py-2">Searching...</p>
           )}
@@ -251,7 +247,7 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
               {searchResults.map(c => (
                 <button
                   key={c.id}
-                  onClick={() => { setCustomer(c); setShowSearch(false); setSearchQuery(''); }}
+                  onClick={() => { setCustomer(c as Customer); setShowSearch(false); setSearchQuery(''); }}
                   className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-stone-100 transition-colors text-left group"
                 >
                   <div className="min-w-0">
