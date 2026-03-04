@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 
     // Get the invite
     const { data: invite, error } = await serviceSupabase
-      .from('invites')
+      .from('inbox_invites')
       .select(`
         id,
         email,
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 
     // Check if account exists for this email
     const { data: existingUser } = await serviceSupabase
-      .from('users')
+      .from('inbox_users')
       .select('id')
       .eq('email', invite.email)
       .single();
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     // Get the invite
     const { data: invite, error: inviteError } = await serviceSupabase
-      .from('invites')
+      .from('inbox_invites')
       .select('*')
       .eq('token', token)
       .is('accepted_at', null)
@@ -98,13 +98,13 @@ export async function POST(request: Request) {
 
     // Ensure user profile exists
     const { data: existingProfile } = await serviceSupabase
-      .from('users')
+      .from('inbox_users')
       .select('id')
       .eq('id', user.id)
       .single();
 
     if (!existingProfile) {
-      await serviceSupabase.from('users').insert({
+      await serviceSupabase.from('inbox_users').insert({
         id: user.id,
         email: user.email!,
         name: user.user_metadata?.full_name || null,
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
     if (existingMembership) {
       // Already a member, just mark invite as accepted
       await serviceSupabase
-        .from('invites')
+        .from('inbox_invites')
         .update({ accepted_at: new Date().toISOString() })
         .eq('id', invite.id);
 
@@ -149,7 +149,7 @@ export async function POST(request: Request) {
 
     // Mark invite as accepted
     await serviceSupabase
-      .from('invites')
+      .from('inbox_invites')
       .update({ accepted_at: new Date().toISOString() })
       .eq('id', invite.id);
 

@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     if (search) {
       const searchLower = `%${search.toLowerCase()}%`;
       const { data: contacts, error } = await supabase
-        .from('contacts')
+        .from('inbox_contacts')
         .select('*')
         .eq('user_id', user.id)
         .or(`first_name.ilike.${searchLower},last_name.ilike.${searchLower},company_name.ilike.${searchLower},email_1.ilike.${searchLower},email_2.ilike.${searchLower},email_3.ilike.${searchLower},phone_number.ilike.${searchLower}`)
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
 
     // Get all contacts
     const { data: contacts, error } = await supabase
-      .from('contacts')
+      .from('inbox_contacts')
       .select('*')
       .eq('user_id', user.id)
       .order('company_name', { ascending: true, nullsFirst: false })
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
       }));
 
       const { data, error } = await supabase
-        .from('contacts')
+        .from('inbox_contacts')
         .insert(contactsToInsert)
         .select();
 
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
     }
 
     const { data: contact, error } = await supabase
-      .from('contacts')
+      .from('inbox_contacts')
       .insert({
         user_id: user.id,
         company_name: company_name || null,
@@ -186,7 +186,7 @@ export async function PATCH(request: Request) {
     }
 
     const { data: contact, error } = await supabase
-      .from('contacts')
+      .from('inbox_contacts')
       .update(filteredUpdates)
       .eq('id', contactId)
       .eq('user_id', user.id)
@@ -222,7 +222,7 @@ export async function DELETE(request: Request) {
     }
 
     const { error } = await supabase
-      .from('contacts')
+      .from('inbox_contacts')
       .delete()
       .eq('id', contactId)
       .eq('user_id', user.id);

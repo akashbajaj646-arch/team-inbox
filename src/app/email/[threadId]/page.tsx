@@ -32,7 +32,7 @@ export default function EmailPage() {
 
     // Get user profile
     const { data: userData } = await supabase
-      .from('users')
+      .from('inbox_users')
       .select('*')
       .eq('id', authUser.id)
       .single();

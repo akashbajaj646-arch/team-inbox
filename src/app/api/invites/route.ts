@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 
     // Get pending invites
     const { data: invites, error } = await supabase
-      .from('invites')
+      .from('inbox_invites')
       .select('*, invited_by_user:users!invited_by(name, email)')
       .eq('inbox_id', inboxId)
       .is('accepted_at', null)
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
 
     // Check if user already exists and is a member
     const { data: existingUser } = await serviceSupabase
-      .from('users')
+      .from('inbox_users')
       .select('id')
       .eq('email', email.toLowerCase().trim())
       .single();
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
 
     // Check for existing pending invite
     const { data: existingInvite } = await supabase
-      .from('invites')
+      .from('inbox_invites')
       .select('*')
       .eq('inbox_id', inboxId)
       .eq('email', email.toLowerCase().trim())
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
 
     // Create the invite
     const { data: invite, error } = await supabase
-      .from('invites')
+      .from('inbox_invites')
       .insert({
         email: email.toLowerCase().trim(),
         inbox_id: inboxId,
@@ -151,7 +151,7 @@ export async function POST(request: Request) {
 
     // Get inviter details
     const { data: inviter } = await supabase
-      .from('users')
+      .from('inbox_users')
       .select('name, email')
       .eq('id', user.id)
       .single();
@@ -186,7 +186,7 @@ export async function DELETE(request: Request) {
 
     // Get the invite to check permissions
     const { data: invite } = await supabase
-      .from('invites')
+      .from('inbox_invites')
       .select('inbox_id')
       .eq('id', inviteId)
       .single();
@@ -214,7 +214,7 @@ export async function DELETE(request: Request) {
 
     // Delete the invite
     const { error } = await supabase
-      .from('invites')
+      .from('inbox_invites')
       .delete()
       .eq('id', inviteId);
 

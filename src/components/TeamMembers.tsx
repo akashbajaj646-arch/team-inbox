@@ -34,7 +34,7 @@ export default function TeamMembers({ currentUser, isAdmin }: TeamMembersProps) 
     setLoading(true);
 
     const { data: usersData } = await supabase
-      .from('users')
+      .from('inbox_users')
       .select('*')
       .order('name', { ascending: true });
 

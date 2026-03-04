@@ -52,14 +52,14 @@ export default function HomePage() {
     }
 
     const { data: profile } = await supabase
-      .from('users')
+      .from('inbox_users')
       .select('*')
       .eq('id', user.id)
       .single();
 
     if (!profile) {
       const { data: newProfile } = await supabase
-        .from('users')
+        .from('inbox_users')
         .insert({
           id: user.id,
           email: user.email!,

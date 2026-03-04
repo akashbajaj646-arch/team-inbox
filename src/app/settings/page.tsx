@@ -43,7 +43,7 @@ function SettingsContent() {
     }
 
     const { data: profile } = await supabase
-      .from('users')
+      .from('inbox_users')
       .select('*')
       .eq('id', authUser.id)
       .single();
