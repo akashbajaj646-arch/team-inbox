@@ -43,7 +43,8 @@ export async function GET(request: Request) {
     const { data: messages, error } = await supabase
       .from('sms_messages')
       .select(`
-        *
+        *,
+        attachments:sms_attachments(id, media_url, content_type)
       `)
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });

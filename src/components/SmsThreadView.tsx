@@ -326,7 +326,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                             {message.attachments.map((attachment) => (
                               <div key={attachment.id}>
                                 {attachment.content_type?.startsWith('image/') ? (
-                                  <img src={attachment.media_url} alt="MMS attachment" className="max-w-full rounded-lg" />
+                                  <img src={`/api/sms/media?url=${encodeURIComponent(attachment.media_url)}&inboxId=${inbox.id}`} alt="MMS attachment" className="max-w-full rounded-lg" />
                                 ) : (
                                   <a href={attachment.media_url} target="_blank" rel="noopener noreferrer" className="text-sm underline">
                                     View attachment
