@@ -70,9 +70,7 @@ export default function TeamMembers({ currentUser, isAdmin }: TeamMembersProps) 
       `)
       .eq('user_id', userId);
 
-    const adminInboxIds = inboxes.map(i => i.id);
     const filtered = (data || [])
-      .filter(m => adminInboxIds.includes(m.inbox_id))
       .map(m => ({
         inbox_id: m.inbox_id,
         role: m.role as 'admin' | 'member',
