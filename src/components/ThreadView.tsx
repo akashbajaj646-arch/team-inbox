@@ -6,6 +6,7 @@ import type { EmailThread, EmailMessage, ThreadPresence, User, Template } from '
 import CommentSection from './CommentSection';
 import TemplatePicker from './TemplatePicker';
 import RichTextEditor from './RichTextEditor';
+import CustomerCard from './CustomerCard';
 
 interface Attachment {
   file: File;
@@ -299,7 +300,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     });
   }
 
-  // Get initials from a name or email
   function getInitials(name: string | null | undefined, email: string): string {
     if (name) {
       const parts = name.trim().split(' ');
@@ -309,7 +309,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     return email.charAt(0).toUpperCase();
   }
 
-  // Consistent color per user based on their ID
   const BUBBLE_COLORS = [
     'bg-violet-500', 'bg-blue-500', 'bg-emerald-500',
     'bg-orange-500', 'bg-pink-500', 'bg-teal-500',
@@ -341,283 +340,295 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
   const drafting = presence.filter((p) => p.status === 'drafting');
   const viewing = presence.filter((p) => p.status === 'viewing');
+  const senderEmail = messages.find(m => !m.is_outbound)?.from_address || messages[0]?.from_address;
 
   return (
-    <div className="flex-1 flex flex-col h-screen bg-analog-surface">
-      {/* Header */}
-      <div className="px-8 py-5 border-b-2 border-analog-border-strong bg-analog-surface">
-        <h2 className="font-display text-2xl font-medium text-analog-text mb-4">
-          {thread.subject || '(No subject)'}
-        </h2>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 flex-1">
-            <div className="avatar avatar-lg avatar-blue font-display">
-              {messages[messages.length - 1]?.from_name?.charAt(0) || 
-               messages[messages.length - 1]?.from_address?.charAt(0) || '?'}
+    <div className="flex-1 flex flex-row h-screen bg-analog-surface overflow-hidden">
+
+      {/* Main thread column */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+
+        {/* Header */}
+        <div className="px-8 py-5 border-b-2 border-analog-border-strong bg-analog-surface">
+          <h2 className="font-display text-2xl font-medium text-analog-text mb-4">
+            {thread.subject || '(No subject)'}
+          </h2>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 flex-1">
+              <div className="avatar avatar-lg avatar-blue font-display">
+                {messages[messages.length - 1]?.from_name?.charAt(0) || 
+                 messages[messages.length - 1]?.from_address?.charAt(0) || '?'}
+              </div>
+              <div>
+                <p className="font-semibold text-[15px] text-analog-text">
+                  {messages[messages.length - 1]?.from_name || messages[messages.length - 1]?.from_address}
+                </p>
+                <p className="text-[13px] text-analog-text-faint">
+                  {messages[messages.length - 1]?.from_address}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-semibold text-[15px] text-analog-text">
-                {messages[messages.length - 1]?.from_name || messages[messages.length - 1]?.from_address}
-              </p>
-              <p className="text-[13px] text-analog-text-faint">
-                {messages[messages.length - 1]?.from_address}
-              </p>
-            </div>
-          </div>
 
-          {/* Presence Badge */}
-          {(drafting.length > 0 || viewing.length > 0) && (
-            <div className="flex items-center gap-2 px-3.5 py-2 bg-analog-hover border border-analog-border rounded-lg">
-              <div 
-                className="presence-dot"
-                style={{ background: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}
-              />
-              <span className="text-xs font-medium" style={{ color: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}>
-                {drafting.length > 0
-                  ? `${drafting.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is drafting`
-                  : `${viewing.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is viewing`}
-              </span>
-            </div>
-          )}
-
-          {/* Open in New Window */}
-          <button
-            onClick={() => window.open(`/email/${threadId}`, '_blank', 'noopener,noreferrer')}
-            className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150"
-            title="Open in new window"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="max-w-4xl space-y-5">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`bg-analog-surface-alt border rounded-lg overflow-hidden ${
-                message.is_outbound
-                  ? 'border-analog-accent border-l-4'
-                  : 'border-analog-border'
-              }`}
-            >
-              {/* Message Header */}
-              <div className={`px-5 py-4 border-b border-analog-border flex items-center gap-3 ${
-                message.is_outbound ? 'bg-[#FDF8F7]' : 'bg-analog-surface'
-              }`}>
-                <div className={`avatar avatar-md font-display ${
-                  message.is_outbound ? 'avatar-red' : 'avatar-blue'
-                }`}>
-                  {(message.from_name || message.from_address).charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-sm text-analog-text">
-                    {message.from_name || message.from_address}
-                  </p>
-                </div>
-
-                {/* Reply bubble — who on the team sent this */}
-                {message.is_outbound && message.sent_by && (
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getBubbleColor(message.sent_by.id)}`}
-                      title={message.sent_by.name || message.sent_by.email}
-                    >
-                      {getInitials(message.sent_by.name, message.sent_by.email)}
-                    </div>
-                    <span className="text-xs text-analog-text-muted">
-                      {message.sent_by.name?.split(' ')[0] || message.sent_by.email.split('@')[0]}
-                    </span>
-                  </div>
-                )}
-
-                <span className="text-xs text-analog-text-placeholder">
-                  {formatDate(message.sent_at)}
+            {/* Presence Badge */}
+            {(drafting.length > 0 || viewing.length > 0) && (
+              <div className="flex items-center gap-2 px-3.5 py-2 bg-analog-hover border border-analog-border rounded-lg">
+                <div 
+                  className="presence-dot"
+                  style={{ background: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}
+                />
+                <span className="text-xs font-medium" style={{ color: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}>
+                  {drafting.length > 0
+                    ? `${drafting.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is drafting`
+                    : `${viewing.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is viewing`}
                 </span>
               </div>
+            )}
 
-              {/* Message Body */}
-              <div className="px-5 py-5 overflow-x-auto">
-                {message.body_html ? (
-                  <div
-                    className="email-prose"
-                    dangerouslySetInnerHTML={{ __html: message.body_html }}
-                  />
+            {/* Open in New Window */}
+            <button
+              onClick={() => window.open(`/email/${threadId}`, '_blank', 'noopener,noreferrer')}
+              className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150"
+              title="Open in new window"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-8 py-6">
+          <div className="max-w-4xl space-y-5">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`bg-analog-surface-alt border rounded-lg overflow-hidden ${
+                  message.is_outbound
+                    ? 'border-analog-accent border-l-4'
+                    : 'border-analog-border'
+                }`}
+              >
+                {/* Message Header */}
+                <div className={`px-5 py-4 border-b border-analog-border flex items-center gap-3 ${
+                  message.is_outbound ? 'bg-[#FDF8F7]' : 'bg-analog-surface'
+                }`}>
+                  <div className={`avatar avatar-md font-display ${
+                    message.is_outbound ? 'avatar-red' : 'avatar-blue'
+                  }`}>
+                    {(message.from_name || message.from_address).charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm text-analog-text">
+                      {message.from_name || message.from_address}
+                    </p>
+                  </div>
+
+                  {message.is_outbound && message.sent_by && (
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getBubbleColor(message.sent_by.id)}`}
+                        title={message.sent_by.name || message.sent_by.email}
+                      >
+                        {getInitials(message.sent_by.name, message.sent_by.email)}
+                      </div>
+                      <span className="text-xs text-analog-text-muted">
+                        {message.sent_by.name?.split(' ')[0] || message.sent_by.email.split('@')[0]}
+                      </span>
+                    </div>
+                  )}
+
+                  <span className="text-xs text-analog-text-placeholder">
+                    {formatDate(message.sent_at)}
+                  </span>
+                </div>
+
+                {/* Message Body */}
+                <div className="px-5 py-5 overflow-x-auto">
+                  {message.body_html ? (
+                    <div
+                      className="email-prose"
+                      dangerouslySetInnerHTML={{ __html: message.body_html }}
+                    />
+                  ) : (
+                    <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
+                      {message.body_text}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Team Discussion */}
+          <div className="max-w-4xl mt-8 pt-6 border-t-2 border-analog-border-strong">
+            <CommentSection threadId={threadId} currentUser={currentUser} />
+          </div>
+        </div>
+
+        {/* Composer */}
+        <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-8 py-5">
+          {!showComposer ? (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowComposer(true)}
+                className="flex-1 px-5 py-3.5 bg-analog-surface border border-analog-border rounded-lg text-analog-text-placeholder text-left hover:border-analog-accent transition-all duration-150"
+              >
+                Write a reply...
+              </button>
+              <button
+                onClick={handleAiAssist}
+                disabled={aiLoading}
+                className="px-4 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-all duration-150 flex items-center gap-2 disabled:opacity-50"
+              >
+                {aiLoading ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Drafting...
+                  </>
                 ) : (
-                  <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
-                    {message.body_text}
-                  </p>
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                    </svg>
+                    AI Assist
+                  </>
+                )}
+              </button>
+              {thread && (
+                <TemplatePicker
+                  inboxId={thread.inbox_id}
+                  onSelect={handleTemplateSelect}
+                />
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                {!showCcBcc ? (
+                  <button
+                    onClick={() => setShowCcBcc(true)}
+                    className="text-sm text-analog-accent hover:underline"
+                  >
+                    Add Cc/Bcc
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-analog-text-muted w-10">Cc:</label>
+                      <input
+                        type="text"
+                        value={ccField}
+                        onChange={(e) => setCcField(e.target.value)}
+                        placeholder="email@example.com, another@example.com"
+                        className="input flex-1 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-analog-text-muted w-10">Bcc:</label>
+                      <input
+                        type="text"
+                        value={bccField}
+                        onChange={(e) => setBccField(e.target.value)}
+                        placeholder="email@example.com, another@example.com"
+                        className="input flex-1 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
-        </div>
 
-        {/* Team Discussion */}
-        <div className="max-w-4xl mt-8 pt-6 border-t-2 border-analog-border-strong">
-          <CommentSection threadId={threadId} currentUser={currentUser} />
-        </div>
-      </div>
-
-      {/* Composer */}
-      <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-8 py-5">
-        {!showComposer ? (
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowComposer(true)}
-              className="flex-1 px-5 py-3.5 bg-analog-surface border border-analog-border rounded-lg text-analog-text-placeholder text-left hover:border-analog-accent transition-all duration-150"
-            >
-              Write a reply...
-            </button>
-            <button
-              onClick={handleAiAssist}
-              disabled={aiLoading}
-              className="px-4 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-all duration-150 flex items-center gap-2 disabled:opacity-50"
-            >
-              {aiLoading ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Drafting...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
-                  </svg>
-                  AI Assist
-                </>
-              )}
-            </button>
-            {thread && (
-              <TemplatePicker
-                inboxId={thread.inbox_id}
-                onSelect={handleTemplateSelect}
+              <RichTextEditor
+                content={replyBody}
+                onChange={setReplyBody}
+                placeholder="Write your reply..."
               />
-            )}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              {!showCcBcc ? (
-                <button
-                  onClick={() => setShowCcBcc(true)}
-                  className="text-sm text-analog-accent hover:underline"
-                >
-                  Add Cc/Bcc
-                </button>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-analog-text-muted w-10">Cc:</label>
-                    <input
-                      type="text"
-                      value={ccField}
-                      onChange={(e) => setCcField(e.target.value)}
-                      placeholder="email@example.com, another@example.com"
-                      className="input flex-1 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-analog-text-muted w-10">Bcc:</label>
-                    <input
-                      type="text"
-                      value={bccField}
-                      onChange={(e) => setBccField(e.target.value)}
-                      placeholder="email@example.com, another@example.com"
-                      className="input flex-1 py-2 text-sm"
-                    />
-                  </div>
+
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {attachments.map((attachment, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center gap-2 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg text-sm"
+                    >
+                      <svg className="w-4 h-4 text-analog-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span className="text-analog-text truncate max-w-[150px]">{attachment.name}</span>
+                      <span className="text-analog-text-faint">({formatFileSize(attachment.size)})</span>
+                      <button
+                        onClick={() => removeAttachment(index)}
+                        className="p-0.5 text-analog-text-muted hover:text-analog-error transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
-            </div>
 
-            <RichTextEditor
-              content={replyBody}
-              onChange={setReplyBody}
-              placeholder="Write your reply..."
-            />
-
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {attachments.map((attachment, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg text-sm"
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setShowComposer(false);
+                      setReplyBody('');
+                      setAttachments([]);
+                    }}
+                    className="px-4 py-2 text-analog-text-muted hover:text-analog-text transition-colors"
                   >
-                    <svg className="w-4 h-4 text-analog-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    Cancel
+                  </button>
+                  
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                    multiple
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="btn btn-secondary"
+                    title="Add attachment"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                     </svg>
-                    <span className="text-analog-text truncate max-w-[150px]">{attachment.name}</span>
-                    <span className="text-analog-text-faint">({formatFileSize(attachment.size)})</span>
-                    <button
-                      onClick={() => removeAttachment(index)}
-                      className="p-0.5 text-analog-text-muted hover:text-analog-error transition-colors"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+                    Attach
+                  </button>
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+                  {thread && (
+                    <TemplatePicker
+                      inboxId={thread.inbox_id}
+                      onSelect={handleTemplateSelect}
+                    />
+                  )}
+                </div>
                 <button
-                  onClick={() => {
-                    setShowComposer(false);
-                    setReplyBody('');
-                    setAttachments([]);
-                  }}
-                  className="px-4 py-2 text-analog-text-muted hover:text-analog-text transition-colors"
+                  onClick={handleSend}
+                  disabled={!replyBody.trim() || replyBody === '<p></p>' || sending}
+                  className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 >
-                  Cancel
+                  {sending ? 'Sending...' : 'Send Reply'}
                 </button>
-                
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileSelect}
-                  multiple
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="btn btn-secondary"
-                  title="Add attachment"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                  </svg>
-                  Attach
-                </button>
-
-                {thread && (
-                  <TemplatePicker
-                    inboxId={thread.inbox_id}
-                    onSelect={handleTemplateSelect}
-                  />
-                )}
               </div>
-              <button
-                onClick={handleSend}
-                disabled={!replyBody.trim() || replyBody === '<p></p>' || sending}
-                className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-              >
-                {sending ? 'Sending...' : 'Send Reply'}
-              </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+
+      </div>{/* end main thread column */}
+
+      {/* Right sidebar */}
+      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
+        <CustomerCard email={senderEmail} />
       </div>
+
     </div>
   );
 }
