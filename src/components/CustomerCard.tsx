@@ -81,7 +81,7 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
         .or(`customer_name.ilike.%${q}%,email.ilike.%${q}%,account_number.ilike.%${q}%`)
         .limit(8);
 
-      setSearchResults(data || []);
+      setSearchResults((data as Customer[]) || []);
     } catch {
       setSearchResults([]);
     } finally {
