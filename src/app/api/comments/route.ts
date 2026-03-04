@@ -27,7 +27,7 @@ export async function GET(request: Request) {
       .from('thread_comments')
       .select(`
         *,
-        user:users(id, name, email, avatar_url)
+        user:inbox_users(id, name, email, avatar_url)
       `)
       .order('created_at', { ascending: true });
 
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
       })
       .select(`
         *,
-        user:users(id, name, email, avatar_url)
+        user:inbox_users(id, name, email, avatar_url)
       `)
       .single();
 

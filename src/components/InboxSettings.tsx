@@ -60,7 +60,7 @@ export default function InboxSettings({ inbox, currentUser, isAdmin, onUpdate }:
         inbox_id,
         user_id,
         role,
-        user:users(*)
+        user:inbox_users(*)
       `)
       .eq('inbox_id', inbox.id);
 

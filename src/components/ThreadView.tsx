@@ -117,7 +117,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       .from('email_messages')
       .select(`
         *,
-        sent_by:users(id, name, email, avatar_url)
+        sent_by:inbox_users(id, name, email, avatar_url)
       `)
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });
@@ -130,7 +130,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       .from('thread_presence')
       .select(`
         *,
-        user:users(id, name, email, avatar_url)
+        user:inbox_users(id, name, email, avatar_url)
       `)
       .eq('thread_id', threadId)
       .neq('user_id', currentUser.id);

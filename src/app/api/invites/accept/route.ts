@@ -22,7 +22,7 @@ export async function GET(request: Request) {
         role,
         expires_at,
         inbox:inboxes(id, name),
-        inviter:users!invited_by(name, email)
+        inviter:inbox_users!invited_by(name, email)
       `)
       .eq('token', token)
       .is('accepted_at', null)

@@ -4,7 +4,7 @@ import twilio from 'twilio';
 
 export async function POST(request: Request) {
   try {
-    const { inboxId } = await request.json();
+    const { inboxId, deepSync } = await request.json();
 
     if (!inboxId) {
       return NextResponse.json({ error: 'Inbox ID required' }, { status: 400 });
@@ -13,13 +13,11 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const serviceSupabase = await createServiceClient();
 
-    // Verify user is authenticated
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Verify user has access to this inbox
     const { data: membership } = await supabase
       .from('inbox_members')
       .select('*')
@@ -31,7 +29,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Get Twilio credentials (use service client)
     const { data: inbox } = await serviceSupabase
       .from('inboxes')
       .select('twilio_phone_number, twilio_account_sid, twilio_auth_token')
@@ -39,38 +36,32 @@ export async function POST(request: Request) {
       .single();
 
     if (!inbox?.twilio_account_sid || !inbox?.twilio_auth_token || !inbox?.twilio_phone_number) {
-      return NextResponse.json(
-        { error: 'Twilio not configured for this inbox' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Twilio not configured for this inbox' }, { status: 400 });
     }
 
-    // Initialize Twilio client
     const twilioClient = twilio(inbox.twilio_account_sid, inbox.twilio_auth_token);
 
-    // Calculate date 30 days ago
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // Deep sync looks back 400 days, regular sync 30 days
+    const lookbackDays = deepSync ? 400 : 30;
+    const lookbackDate = new Date();
+    lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
 
-    // Fetch messages from Twilio (both sent and received)
     const [inboundMessages, outboundMessages] = await Promise.all([
       twilioClient.messages.list({
         to: inbox.twilio_phone_number,
-        dateSentAfter: thirtyDaysAgo,
-        limit: 1000,
+        dateSentAfter: lookbackDate,
+        limit: 10000,
       }),
       twilioClient.messages.list({
         from: inbox.twilio_phone_number,
-        dateSentAfter: thirtyDaysAgo,
-        limit: 1000,
+        dateSentAfter: lookbackDate,
+        limit: 10000,
       }),
     ]);
 
     const allMessages = [...inboundMessages, ...outboundMessages];
-    
-    // Sort by date
-    allMessages.sort((a, b) => 
-      new Date(a.dateSent || a.dateCreated).getTime() - 
+    allMessages.sort((a, b) =>
+      new Date(a.dateSent || a.dateCreated).getTime() -
       new Date(b.dateSent || b.dateCreated).getTime()
     );
 
@@ -79,25 +70,21 @@ export async function POST(request: Request) {
     const processedSids = new Set<string>();
 
     for (const msg of allMessages) {
-      // Skip duplicates (in case a message appears in both lists)
       if (processedSids.has(msg.sid)) continue;
       processedSids.add(msg.sid);
 
-      // Determine direction and contact phone
       const isInbound = msg.to === inbox.twilio_phone_number;
       const contactPhone = isInbound ? msg.from : msg.to;
       const direction = isInbound ? 'inbound' : 'outbound';
 
-      // Check if message already exists
       const { data: existingMessage } = await serviceSupabase
         .from('sms_messages')
         .select('id')
         .eq('twilio_message_sid', msg.sid)
         .single();
 
-      if (existingMessage) continue; // Skip if already synced
+      if (existingMessage) continue;
 
-      // Find or create thread for this contact
       let { data: thread } = await serviceSupabase
         .from('sms_threads')
         .select('id')
@@ -106,7 +93,6 @@ export async function POST(request: Request) {
         .single();
 
       if (!thread) {
-        // Create new thread
         const { data: newThread, error: threadError } = await serviceSupabase
           .from('sms_threads')
           .insert({
@@ -115,7 +101,7 @@ export async function POST(request: Request) {
             contact_name: null,
             last_message_at: msg.dateSent || msg.dateCreated,
             last_message_preview: msg.body?.substring(0, 100) || '[Media]',
-            is_read: !isInbound, // Mark as read if outbound
+            is_read: !isInbound,
           })
           .select()
           .single();
@@ -128,10 +114,8 @@ export async function POST(request: Request) {
         threadsCreated++;
       }
 
-      // Skip if thread is still null after creation attempt
       if (!thread) continue;
 
-      // Insert the message
       const { data: newMessage, error: messageError } = await serviceSupabase
         .from('sms_messages')
         .insert({
@@ -152,16 +136,11 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Fetch and save MMS attachments if any
       if (msg.numMedia && parseInt(msg.numMedia) > 0 && newMessage) {
         try {
-          const mediaList = await twilioClient
-            .messages(msg.sid)
-            .media.list();
-
+          const mediaList = await twilioClient.messages(msg.sid).media.list();
           for (const media of mediaList) {
             const mediaUrl = `https://api.twilio.com${media.uri.replace('.json', '')}`;
-            
             await serviceSupabase.from('sms_attachments').insert({
               message_id: newMessage.id,
               media_url: mediaUrl,
@@ -175,7 +154,6 @@ export async function POST(request: Request) {
 
       syncedCount++;
 
-      // Update thread's last message info
       await serviceSupabase
         .from('sms_threads')
         .update({
@@ -192,12 +170,10 @@ export async function POST(request: Request) {
       synced: syncedCount,
       threadsCreated,
       totalFound: allMessages.length,
+      lookbackDays,
     });
   } catch (err: any) {
     console.error('SMS sync error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Failed to sync SMS' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err.message || 'Failed to sync SMS' }, { status: 500 });
   }
 }

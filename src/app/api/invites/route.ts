@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     // Get pending invites
     const { data: invites, error } = await supabase
       .from('inbox_invites')
-      .select('*, invited_by_user:users!invited_by(name, email)')
+      .select('*, invited_by_user:inbox_users!invited_by(name, email)')
       .eq('inbox_id', inboxId)
       .is('accepted_at', null)
       .gt('expires_at', new Date().toISOString())

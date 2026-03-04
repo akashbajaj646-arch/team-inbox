@@ -54,7 +54,7 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
       .from('thread_comments')
       .select(`
         *,
-        user:users(id, name, email, avatar_url)
+        user:inbox_users(id, name, email, avatar_url)
       `)
       .order('created_at', { ascending: true });
 
