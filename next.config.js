@@ -5,6 +5,7 @@ const nextConfig = {
       bodySizeLimit: '2mb',
     },
   },
+  serverExternalPackages: ['lucide-react'],
 };
 
 module.exports = nextConfig;
