@@ -631,7 +631,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
         </div>
 
         {/* Team Discussion - fixed at bottom */}
-        <div className="border-t-2 border-analog-border-strong bg-analog-surface px-8 py-4">
+        <div className="border-t-2 border-analog-border-strong bg-analog-surface px-8 py-4 flex-shrink-0 h-56 overflow-y-auto">
           <CommentSection threadId={threadId} currentUser={currentUser} />
         </div>
 
