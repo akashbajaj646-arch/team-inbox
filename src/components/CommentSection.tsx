@@ -77,7 +77,7 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
     setSubmitting(true);
 
     try {
-      await fetch('/api/comments', {
+      const res = await fetch('/api/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -87,7 +87,10 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
         }),
       });
 
-      setNewComment('');
+      if (res.ok) {
+        setNewComment('');
+        await loadComments();
+      }
     } catch (err) {
       console.error('Comment error:', err);
     }

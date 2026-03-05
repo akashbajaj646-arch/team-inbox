@@ -460,10 +460,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
             ))}
           </div>
 
-          {/* Team Discussion */}
-          <div className="max-w-4xl mt-8 pt-6 border-t-2 border-analog-border-strong">
-            <CommentSection threadId={threadId} currentUser={currentUser} />
-          </div>
         </div>
 
         {/* Composer */}
@@ -620,6 +616,11 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Team Discussion - fixed at bottom */}
+        <div className="border-t-2 border-analog-border-strong bg-analog-surface px-8 py-4">
+          <CommentSection threadId={threadId} currentUser={currentUser} />
         </div>
 
       </div>{/* end main thread column */}
