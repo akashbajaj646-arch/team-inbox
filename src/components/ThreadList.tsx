@@ -215,6 +215,11 @@ export default function ThreadList({
       .eq('inbox_id', inbox.id)
       .order('last_message_at', { ascending: false });
 
+    // Hide threads assigned to a filtered inbox when viewing parent
+    if (!filteredInbox) {
+      query = query.is('filtered_inbox_id', null);
+    }
+
     // Apply filters based on view
     switch (activeView) {
       case 'all':

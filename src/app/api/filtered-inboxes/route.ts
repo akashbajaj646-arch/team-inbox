@@ -219,3 +219,111 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
+
+// PATCH - Apply filter to all existing threads
+export async function PATCH(request: Request) {
+  try {
+    const { id } = await request.json();
+
+    if (!id) {
+      return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Get the filtered inbox
+    const { data: fi } = await supabase
+      .from('filtered_inboxes')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (!fi) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    // Verify admin role
+    const { data: membership } = await supabase
+      .from('inbox_members')
+      .select('role')
+      .eq('inbox_id', fi.inbox_id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (membership?.role !== 'admin') {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    }
+
+    // Fetch all threads for this inbox
+    const { data: threads } = await supabase
+      .from('email_threads')
+      .select('id, subject')
+      .eq('inbox_id', fi.inbox_id)
+      .is('deleted_at', null);
+
+    if (!threads?.length) {
+      return NextResponse.json({ applied: 0 });
+    }
+
+    // Fetch messages for matching
+    const threadIds = threads.map((t: any) => t.id);
+    const { data: messages } = await supabase
+      .from('email_messages')
+      .select('thread_id, from_address, from_name, body_text')
+      .in('thread_id', threadIds);
+
+    const messagesByThread: Record<string, any[]> = {};
+    (messages || []).forEach((m: any) => {
+      if (!messagesByThread[m.thread_id]) messagesByThread[m.thread_id] = [];
+      messagesByThread[m.thread_id].push(m);
+    });
+
+    const filters: any[] = fi.filters;
+    const logic: string = fi.filter_logic;
+
+    function matchesFilter(thread: any, msgs: any[], filter: any): boolean {
+      const val = filter.value.toLowerCase();
+      const check = (str: string) => {
+        str = (str || '').toLowerCase();
+        switch (filter.operator) {
+          case 'contains': return str.includes(val);
+          case 'equals': return str === val;
+          case 'starts_with': return str.startsWith(val);
+          case 'ends_with': return str.endsWith(val);
+          default: return false;
+        }
+      };
+      switch (filter.field) {
+        case 'from': return msgs.some(m => check(m.from_address) || check(m.from_name));
+        case 'subject': return check(thread.subject || '');
+        case 'body': return msgs.some(m => check(m.body_text || ''));
+        default: return false;
+      }
+    }
+
+    const matchingIds = threads
+      .filter((thread: any) => {
+        const msgs = messagesByThread[thread.id] || [];
+        if (logic === 'all') return filters.every(f => matchesFilter(thread, msgs, f));
+        return filters.some(f => matchesFilter(thread, msgs, f));
+      })
+      .map((t: any) => t.id);
+
+    if (matchingIds.length > 0) {
+      await supabase
+        .from('email_threads')
+        .update({ filtered_inbox_id: id })
+        .in('id', matchingIds);
+    }
+
+    return NextResponse.json({ applied: matchingIds.length });
+  } catch (err) {
+    console.error('Error applying filter:', err);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}

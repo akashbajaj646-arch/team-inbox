@@ -29,6 +29,9 @@ export default function FilteredInboxManager({ inbox, isAdmin, onUpdate }: Filte
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applyToExisting, setApplyToExisting] = useState(false);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [applyResult, setApplyResult] = useState<Record<string, number>>({});
 
   // Form state
   const [name, setName] = useState('');
@@ -62,6 +65,7 @@ export default function FilteredInboxManager({ inbox, isAdmin, onUpdate }: Filte
     setEditingId(null);
     setShowForm(false);
     setError(null);
+    setApplyToExisting(false);
   }
 
   function startEdit(fi: FilteredInbox) {
@@ -69,6 +73,7 @@ export default function FilteredInboxManager({ inbox, isAdmin, onUpdate }: Filte
     setFilterLogic(fi.filter_logic);
     setFilters(fi.filters.length > 0 ? fi.filters : [{ field: 'from', operator: 'contains', value: '' }]);
     setEditingId(fi.id);
+    setApplyToExisting(false);
     setShowForm(true);
   }
 
@@ -84,6 +89,24 @@ export default function FilteredInboxManager({ inbox, isAdmin, onUpdate }: Filte
 
   function updateFilter(index: number, updates: Partial<FilterRule>) {
     setFilters(filters.map((f, i) => i === index ? { ...f, ...updates } : f));
+  }
+
+  async function applyFilter(id: string) {
+    setApplying(id);
+    try {
+      const response = await fetch('/api/filtered-inboxes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setApplyResult(prev => ({ ...prev, [id]: data.applied }));
+      }
+    } catch (err) {
+      console.error('Error applying filter:', err);
+    }
+    setApplying(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -118,6 +141,10 @@ export default function FilteredInboxManager({ inbox, isAdmin, onUpdate }: Filte
       });
 
       if (response.ok) {
+        const saved = await response.json();
+        if (applyToExisting && saved.filteredInbox?.id) {
+          await applyFilter(saved.filteredInbox.id);
+        }
         resetForm();
         loadFilteredInboxes();
         onUpdate();
@@ -284,6 +311,23 @@ export default function FilteredInboxManager({ inbox, isAdmin, onUpdate }: Filte
               </button>
             </div>
 
+            {/* Apply to existing */}
+            <div className="mb-4 p-3 bg-analog-surface border border-analog-border rounded-lg flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="applyToExisting"
+                checked={applyToExisting}
+                onChange={(e) => setApplyToExisting(e.target.checked)}
+                className="mt-0.5"
+              />
+              <label htmlFor="applyToExisting" className="text-sm text-analog-text cursor-pointer">
+                <span className="font-medium">Apply to existing emails</span>
+                <span className="block text-analog-text-muted mt-0.5">
+                  Emails matching this filter will be moved out of the main inbox and only appear here.
+                </span>
+              </label>
+            </div>
+
             {/* Actions */}
             <div className="flex gap-3">
               <button
@@ -341,6 +385,28 @@ export default function FilteredInboxManager({ inbox, isAdmin, onUpdate }: Filte
                 </div>
                 {isAdmin && (
                   <div className="flex items-center gap-2">
+                    {applyResult[fi.id] !== undefined && (
+                      <span className="text-xs text-analog-accent font-medium">
+                        {applyResult[fi.id]} applied
+                      </span>
+                    )}
+                    <button
+                      onClick={() => applyFilter(fi.id)}
+                      disabled={applying === fi.id}
+                      className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150 disabled:opacity-50"
+                      title="Apply to existing emails"
+                    >
+                      {applying === fi.id ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      )}
+                    </button>
                     <button
                       onClick={() => startEdit(fi)}
                       className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150"
