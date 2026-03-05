@@ -123,6 +123,7 @@ export async function POST(request: Request) {
         sms_thread_id: smsThreadId || null,
         user_id: user.id,
         content,
+        mentioned_user_ids: mentionedUserIds || [],
       })
       .select(`
         *,

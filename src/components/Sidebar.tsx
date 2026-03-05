@@ -33,10 +33,16 @@ export default function Sidebar({
   const [inboxes, setInboxes] = useState<InboxWithFilters[]>([]);
   const [expandedInboxes, setExpandedInboxes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [mentions, setMentions] = useState<any[]>([]);
+  const [showMentions, setShowMentions] = useState(false);
   const supabase = createClient();
 
   useEffect(() => {
     loadInboxes();
+    loadMentions();
+
+    const interval = setInterval(loadMentions, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -44,6 +50,49 @@ export default function Sidebar({
       setExpandedInboxes(prev => new Set(Array.from(prev).concat(selectedInboxId)));
     }
   }, [selectedInboxId, selectedFilteredInboxId]);
+
+  async function loadMentions() {
+    const { data } = await supabase
+      .from('thread_comments')
+      .select(`
+        id,
+        content,
+        created_at,
+        thread_id,
+        sms_thread_id,
+        mention_read_by,
+        user:inbox_users(name, email),
+        email_thread:email_threads(subject, inbox_id),
+        sms_thread:sms_threads(contact_phone, inbox_id)
+      `)
+      .contains('mentioned_user_ids', [currentUser.id])
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    const unread = (data || []).filter(
+      m => !((m.mention_read_by || []).includes(currentUser.id))
+    );
+    setMentions(unread);
+  }
+
+  async function markMentionRead(commentId: string) {
+    await supabase.rpc('append_mention_read', {
+      comment_id: commentId,
+      user_id: currentUser.id,
+    });
+    setMentions(prev => prev.filter(m => m.id !== commentId));
+  }
+
+  async function markAllMentionsRead() {
+    for (const mention of mentions) {
+      await supabase.rpc('append_mention_read', {
+        comment_id: mention.id,
+        user_id: currentUser.id,
+      });
+    }
+    setMentions([]);
+    setShowMentions(false);
+  }
 
   async function loadInboxes() {
     setLoading(true);
@@ -208,6 +257,93 @@ export default function Sidebar({
           </svg>
           Compose
         </button>
+
+        {/* Mentions Badge */}
+        <div className="relative mt-2">
+          <button
+            onClick={() => setShowMentions(!showMentions)}
+            className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+              showMentions
+                ? 'bg-analog-accent/10 text-analog-accent border border-analog-accent/20'
+                : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text border border-transparent'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+            </svg>
+            <span className="flex-1 text-left">Mentions</span>
+            {mentions.length > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">
+                {mentions.length > 9 ? '9+' : mentions.length}
+              </span>
+            )}
+          </button>
+
+          {/* Mentions Dropdown */}
+          {showMentions && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-analog-border rounded-xl shadow-lg z-50 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-analog-border">
+                <span className="text-xs font-semibold text-analog-text-muted uppercase tracking-wider">
+                  {mentions.length} unread mention{mentions.length !== 1 ? 's' : ''}
+                </span>
+                {mentions.length > 0 && (
+                  <button
+                    onClick={markAllMentionsRead}
+                    className="text-xs text-analog-accent hover:underline"
+                  >
+                    Mark all read
+                  </button>
+                )}
+              </div>
+              {mentions.length === 0 ? (
+                <div className="px-3 py-4 text-sm text-analog-text-muted text-center">
+                  No unread mentions
+                </div>
+              ) : (
+                <div className="max-h-72 overflow-y-auto">
+                  {mentions.map(mention => {
+                    const subject = mention.email_thread?.subject || mention.sms_thread?.contact_phone || 'Unknown thread';
+                    const author = mention.user?.name || mention.user?.email?.split('@')[0] || 'Someone';
+                    return (
+                      <div
+                        key={mention.id}
+                        className="px-3 py-3 border-b border-analog-border-light last:border-b-0 hover:bg-analog-hover cursor-pointer"
+                        onClick={() => {
+                          markMentionRead(mention.id);
+                          if (mention.email_thread?.inbox_id) {
+                            onSelectInbox(mention.email_thread.inbox_id, null);
+                          } else if (mention.sms_thread?.inbox_id) {
+                            onSelectInbox(mention.sms_thread.inbox_id, null);
+                          }
+                          setShowMentions(false);
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-analog-text truncate">{subject}</p>
+                            <p className="text-xs text-analog-text-muted mt-0.5">
+                              <span className="font-medium text-analog-accent">{author}</span> mentioned you
+                            </p>
+                            <p className="text-xs text-analog-text-faint mt-0.5 line-clamp-1">{mention.content}</p>
+                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); markMentionRead(mention.id); }}
+                            className="text-analog-text-faint hover:text-analog-text flex-shrink-0 mt-0.5"
+                            title="Mark as read"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* All Inboxes Search */}
         <button

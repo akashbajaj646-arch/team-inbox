@@ -110,6 +110,15 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setThread(threadData);
     await loadMessages();
     await loadPresence();
+
+    // Mark as read when opened
+    if (threadData && !threadData.is_read) {
+      await supabase
+        .from('email_threads')
+        .update({ is_read: true })
+        .eq('id', threadId);
+    }
+
     setLoading(false);
   }
 
