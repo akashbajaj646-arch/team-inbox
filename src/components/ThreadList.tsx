@@ -775,7 +775,7 @@ export default function ThreadList({
                     <div className="flex-1 min-w-0">
                       {/* Sender with contact name lookup */}
                       <div className="text-xs text-analog-text-muted mb-1 truncate">
-                        {contactNames.get(thread.id) || thread.snippet?.split(' ')[0] || 'Unknown'}
+                        {contactNames.get(thread.id) || ''}
                       </div>
                       <div className="font-body text-[15px] font-medium text-analog-text mb-1.5 line-clamp-1">
                         {thread.subject || '(No subject)'}
