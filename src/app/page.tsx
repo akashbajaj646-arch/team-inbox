@@ -29,9 +29,11 @@ export default function HomePage() {
     checkAuth();
   }, []);
 
+  const pendingThreadRef = { current: null as string | null };
+
   useEffect(() => {
     if (selectedInboxId) {
-      loadInbox();
+      loadInbox(!!selectedThreadId);
     }
   }, [selectedInboxId]);
 
@@ -77,7 +79,7 @@ export default function HomePage() {
     setLoading(false);
   }
 
-  async function loadInbox() {
+  async function loadInbox(preserveThread = false) {
     const { data } = await supabase
       .from('inboxes')
       .select('*')
@@ -85,7 +87,7 @@ export default function HomePage() {
       .single();
 
     setSelectedInbox(data);
-    setSelectedThreadId(null);
+    if (!preserveThread) setSelectedThreadId(null);
   }
 
   async function loadFilteredInbox() {
@@ -108,10 +110,10 @@ export default function HomePage() {
 
   function handleSelectThread(threadId: string, inboxId: string) {
     setShowAllInboxes(false);
-    setSelectedInboxId(inboxId);
     setSelectedFilteredInboxId(null);
-    setSelectedThreadId(threadId);
     setShowCompose(false);
+    setSelectedThreadId(threadId);
+    setSelectedInboxId(inboxId);
   }
 
   function handleSelectInbox(inboxId: string, filteredInboxId?: string | null) {
