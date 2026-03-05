@@ -59,7 +59,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { threadId, smsThreadId, content } = await request.json();
+    const { threadId, smsThreadId, content, mentionedUserIds } = await request.json();
 
     if ((!threadId && !smsThreadId) || !content) {
       return NextResponse.json(
@@ -136,6 +136,21 @@ export async function POST(request: Request) {
         { error: 'Failed to create comment' },
         { status: 500 }
       );
+    }
+
+    // Mark thread as unread for mentioned users so it bubbles to top
+    if (mentionedUserIds?.length) {
+      if (threadId) {
+        await supabase
+          .from('email_threads')
+          .update({ is_read: false })
+          .eq('id', threadId);
+      } else if (smsThreadId) {
+        await supabase
+          .from('sms_threads')
+          .update({ is_read: false })
+          .eq('id', smsThreadId);
+      }
     }
 
     return NextResponse.json({ comment });

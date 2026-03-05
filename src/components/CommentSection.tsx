@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { ThreadComment, User } from '@/types';
 
@@ -10,11 +10,23 @@ interface CommentSectionProps {
   currentUser: User;
 }
 
+interface TeamMember {
+  id: string;
+  name: string | null;
+  email: string;
+}
+
 export default function CommentSection({ threadId, smsThreadId, currentUser }: CommentSectionProps) {
   const [comments, setComments] = useState<ThreadComment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionStart, setMentionStart] = useState(-1);
+  const [mentionedUsers, setMentionedUsers] = useState<TeamMember[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
 
   const effectiveThreadId = threadId || smsThreadId;
@@ -22,8 +34,8 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
 
   useEffect(() => {
     if (!effectiveThreadId) return;
-    
     loadComments();
+    loadTeamMembers();
 
     const filterColumn = isSmsThread ? 'sms_thread_id' : 'thread_id';
     const channel = supabase
@@ -47,6 +59,14 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
     };
   }, [effectiveThreadId, isSmsThread]);
 
+  async function loadTeamMembers() {
+    const { data } = await supabase
+      .from('inbox_users')
+      .select('id, name, email')
+      .neq('id', currentUser.id);
+    setTeamMembers(data || []);
+  }
+
   async function loadComments() {
     if (!effectiveThreadId) return;
 
@@ -65,10 +85,54 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
     }
 
     const { data } = await query;
-
     setComments(data || []);
     setLoading(false);
   }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const value = e.target.value;
+    setNewComment(value);
+
+    const cursor = e.target.selectionStart || 0;
+    const textUpToCursor = value.slice(0, cursor);
+    const atIndex = textUpToCursor.lastIndexOf('@');
+
+    if (atIndex !== -1) {
+      const query = textUpToCursor.slice(atIndex + 1);
+      if (!query.includes(' ')) {
+        setMentionStart(atIndex);
+        setMentionQuery(query);
+        setShowMentions(true);
+        return;
+      }
+    }
+
+    setShowMentions(false);
+    setMentionQuery('');
+    setMentionStart(-1);
+  }
+
+  function handleSelectMention(member: TeamMember) {
+    const displayName = member.name || member.email.split('@')[0];
+    const before = newComment.slice(0, mentionStart);
+    const after = newComment.slice(mentionStart + mentionQuery.length + 1);
+    const inserted = `@${displayName} `;
+    setNewComment(before + inserted + after);
+    setShowMentions(false);
+    setMentionQuery('');
+    setMentionStart(-1);
+
+    if (!mentionedUsers.find(u => u.id === member.id)) {
+      setMentionedUsers(prev => [...prev, member]);
+    }
+
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  const filteredMembers = teamMembers.filter(m => {
+    const name = (m.name || m.email).toLowerCase();
+    return name.includes(mentionQuery.toLowerCase());
+  });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -84,11 +148,13 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
           threadId: isSmsThread ? null : effectiveThreadId,
           smsThreadId: isSmsThread ? effectiveThreadId : null,
           content: newComment,
+          mentionedUserIds: mentionedUsers.map(u => u.id),
         }),
       });
 
       if (res.ok) {
         setNewComment('');
+        setMentionedUsers([]);
         await loadComments();
       }
     } catch (err) {
@@ -113,11 +179,24 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
-  // Generate consistent color based on user ID
   function getAvatarColor(userId: string): string {
     const colors = ['avatar-blue', 'avatar-green', 'avatar-brown', 'avatar-red'];
     const index = userId.charCodeAt(0) % colors.length;
     return colors[index];
+  }
+
+  function renderCommentContent(content: string) {
+    const parts = content.split(/(@\w[\w\s]*?\b)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('@')) {
+        return (
+          <span key={i} className="text-analog-accent font-medium">
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
   }
 
   return (
@@ -151,7 +230,7 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
                   </span>
                 </div>
                 <p className="text-[14px] text-analog-text-secondary mt-1 leading-relaxed">
-                  {comment.content}
+                  {renderCommentContent(comment.content)}
                 </p>
               </div>
             </div>
@@ -164,12 +243,31 @@ export default function CommentSection({ threadId, smsThreadId, currentUser }: C
         <div className={`avatar avatar-sm font-ui flex-shrink-0 ${getAvatarColor(currentUser.id)}`}>
           {currentUser.name?.charAt(0) || currentUser.email.charAt(0).toUpperCase()}
         </div>
-        <div className="flex-1 flex gap-2">
+        <div className="flex-1 flex gap-2 relative">
+          {/* Mention dropdown */}
+          {showMentions && filteredMembers.length > 0 && (
+            <div className="absolute bottom-full mb-1 left-0 bg-white border border-analog-border rounded-lg shadow-lg z-50 min-w-[180px] overflow-hidden">
+              {filteredMembers.map(member => (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => handleSelectMention(member)}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-analog-hover flex items-center gap-2"
+                >
+                  <div className={`avatar avatar-xs font-ui ${getAvatarColor(member.id)}`}>
+                    {(member.name || member.email).charAt(0).toUpperCase()}
+                  </div>
+                  <span>{member.name || member.email.split('@')[0]}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <input
+            ref={inputRef}
             type="text"
             value={newComment}
-            onChange={(e) => setNewComment(e.target.value)}
-            placeholder="Add a comment..."
+            onChange={handleInputChange}
+            placeholder="Add a comment... type @ to mention"
             className="input flex-1 py-2.5 text-sm"
           />
           <button
