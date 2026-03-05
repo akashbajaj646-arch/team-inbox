@@ -99,6 +99,13 @@ export default function HomePage() {
     setSelectedThreadId(null);
   }
 
+  async function handleThreadRead(threadId: string) {
+    await supabase
+      .from('email_threads')
+      .update({ is_read: true })
+      .eq('id', threadId);
+  }
+
   function handleSelectThread(threadId: string, inboxId: string) {
     setShowAllInboxes(false);
     setSelectedInboxId(inboxId);
@@ -173,6 +180,7 @@ export default function HomePage() {
                 inbox={selectedInbox}
                 selectedThreadId={selectedThreadId}
                 onSelectThread={setSelectedThreadId}
+                onThreadRead={handleThreadRead}
               />
               {selectedThreadId ? (
                 <SmsThreadView
@@ -194,6 +202,7 @@ export default function HomePage() {
                 filteredInbox={selectedFilteredInbox}
                 selectedThreadId={selectedThreadId}
                 onSelectThread={setSelectedThreadId}
+                onThreadRead={handleThreadRead}
               />
               {selectedThreadId ? (
                 <ThreadView

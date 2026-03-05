@@ -13,6 +13,7 @@ interface ThreadListProps {
   filteredInbox?: FilteredInbox | null;
   selectedThreadId: string | null;
   onSelectThread: (threadId: string) => void;
+  onThreadRead?: (threadId: string) => void;
 }
 
 // Contact cache
@@ -23,6 +24,7 @@ export default function ThreadList({
   filteredInbox,
   selectedThreadId,
   onSelectThread,
+  onThreadRead,
 }: ThreadListProps) {
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [displayedThreads, setDisplayedThreads] = useState<EmailThread[]>([]);
@@ -726,7 +728,10 @@ export default function ThreadList({
             {displayedThreads.map((thread, index) => (
               <div
                 key={thread.id}
-                onClick={() => onSelectThread(thread.id)}
+                onClick={() => {
+                  onSelectThread(thread.id);
+                  if (!thread.is_read && onThreadRead) onThreadRead(thread.id);
+                }}
                 className={`relative group cursor-pointer transition-all duration-150 ${
                   selectedThreadId === thread.id
                     ? 'bg-analog-surface border-l-4 border-l-analog-accent border-y border-y-analog-border-strong'
