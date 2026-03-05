@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import type { Inbox, User, FilteredInbox } from '@/types';
@@ -38,6 +39,7 @@ export default function Sidebar({
   const [mentions, setMentions] = useState<any[]>([]);
   const [showMentions, setShowMentions] = useState(false);
   const supabase = createClient();
+  const { elementRef: sidebarRef, startResize: startSidebarResize } = useResizable(256, 180, 380, 'sidebar-width');
 
   useEffect(() => {
     loadInboxes();
@@ -234,7 +236,12 @@ export default function Sidebar({
   }
 
   return (
-    <div className="w-64 bg-analog-surface border-r-2 border-analog-border-strong flex flex-col h-screen">
+    <div ref={sidebarRef} className="bg-analog-surface border-r-2 border-analog-border-strong flex flex-col h-screen flex-shrink-0 relative" style={{width: 256}}>
+      {/* Resize handle */}
+      <div
+        onMouseDown={startSidebarResize}
+        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10 group"
+      />
       {/* Logo */}
       <div className="p-6 border-b-2 border-analog-border-strong">
         <div className="flex items-center gap-3">

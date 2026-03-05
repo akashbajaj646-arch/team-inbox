@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
 import type { EmailThread, Inbox, FilteredInbox, FilterRule, Contact } from '@/types';
 
@@ -41,6 +42,7 @@ export default function ThreadList({
   const [searching, setSearching] = useState(false);
   
   const supabase = createClient();
+  const { elementRef: listRef, startResize: startListResize } = useResizable(360, 240, 560, 'threadlist-width');
 
   useEffect(() => {
     loadThreads();
@@ -537,7 +539,12 @@ export default function ThreadList({
   ];
 
   return (
-    <div className="w-[360px] border-r-2 border-analog-border-strong flex flex-col h-screen bg-analog-surface-alt">
+    <div ref={listRef} className="border-r-2 border-analog-border-strong flex flex-col h-screen bg-analog-surface-alt flex-shrink-0 relative" style={{width: 360}}>
+      {/* Resize handle */}
+      <div
+        onMouseDown={startListResize}
+        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10"
+      />
       {/* Header */}
       <div className="px-6 py-5 border-b-2 border-analog-border-strong bg-analog-surface flex items-center justify-between">
         <div>

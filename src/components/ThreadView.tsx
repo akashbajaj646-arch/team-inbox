@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
 import type { EmailThread, EmailMessage, ThreadPresence, User, Template } from '@/types';
 import CommentSection from './CommentSection';
@@ -46,6 +47,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [aiLoading, setAiLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [customerSidebarCollapsed, setCustomerSidebarCollapsed] = useState(false);
+  const { elementRef: customerSidebarRef, startResize: startCustomerResize } = useResizable(288, 200, 480, 'customer-sidebar-width');
   const supabase = createClient();
 
   useEffect(() => {
@@ -637,9 +640,29 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
       </div>{/* end main thread column */}
 
-      {/* Right sidebar */}
-      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
-        <CustomerCard email={senderEmail} />
+      {/* Right sidebar - collapsible + resizable */}
+      <div className="relative flex flex-shrink-0">
+        {/* Collapse toggle button */}
+        <button
+          onClick={() => setCustomerSidebarCollapsed(!customerSidebarCollapsed)}
+          className="absolute -left-3 top-1/2 -translate-y-1/2 z-20 w-6 h-10 bg-analog-surface border border-analog-border rounded-full flex items-center justify-center text-analog-text-muted hover:text-analog-accent hover:border-analog-accent transition-all shadow-sm"
+          title={customerSidebarCollapsed ? 'Show customer panel' : 'Hide customer panel'}
+        >
+          <svg className={`w-3 h-3 transition-transform ${customerSidebarCollapsed ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        {!customerSidebarCollapsed && (
+          <div ref={customerSidebarRef} className="border-l border-stone-200 bg-white overflow-y-auto px-4 py-5 relative" style={{width: 288}}>
+            {/* Resize handle on left edge */}
+            <div
+              onMouseDown={startCustomerResize}
+              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10"
+            />
+            <CustomerCard email={senderEmail} />
+          </div>
+        )}
       </div>
 
     </div>
