@@ -180,7 +180,6 @@ export default function HomePage() {
                 inbox={selectedInbox}
                 selectedThreadId={selectedThreadId}
                 onSelectThread={setSelectedThreadId}
-                onThreadRead={handleThreadRead}
               />
               {selectedThreadId ? (
                 <SmsThreadView
