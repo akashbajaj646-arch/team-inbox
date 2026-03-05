@@ -99,6 +99,14 @@ export default function HomePage() {
     setSelectedThreadId(null);
   }
 
+  function handleSelectThread(threadId: string, inboxId: string) {
+    setShowAllInboxes(false);
+    setSelectedInboxId(inboxId);
+    setSelectedFilteredInboxId(null);
+    setSelectedThreadId(threadId);
+    setShowCompose(false);
+  }
+
   function handleSelectInbox(inboxId: string, filteredInboxId?: string | null) {
     setShowAllInboxes(false);
     setSelectedInboxId(inboxId);
@@ -152,6 +160,7 @@ export default function HomePage() {
         onSelectAllInboxes={handleSelectAllInboxes}
         onSignOut={handleSignOut}
         onCompose={() => setShowCompose(true)}
+        onSelectThread={handleSelectThread}
       />
 
       {showAllInboxes ? (

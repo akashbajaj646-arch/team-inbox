@@ -45,6 +45,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [bccField, setBccField] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
   useEffect(() => {
@@ -120,6 +121,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     }
 
     setLoading(false);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   }
 
   async function loadMessages() {
@@ -469,6 +471,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
             ))}
           </div>
 
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Composer */}
