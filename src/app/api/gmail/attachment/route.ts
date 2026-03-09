@@ -13,28 +13,47 @@ export async function GET(request: Request) {
 
     const supabase = await createServiceClient();
 
-    // Get attachment record with message and inbox info
     const { data: attachment } = await supabase
       .from('email_attachments')
-      .select(`
-        *,
-        message:email_messages(gmail_message_id, thread:email_threads(inbox:inboxes(google_refresh_token)))
-      `)
+      .select('*')
       .eq('id', attachmentId)
       .single();
 
     if (!attachment) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Attachment not found' }, { status: 404 });
     }
 
-    const refreshToken = attachment.message?.thread?.inbox?.google_refresh_token;
-    const gmailMessageId = attachment.message?.gmail_message_id;
+    const { data: message } = await supabase
+      .from('email_messages')
+      .select('gmail_message_id, thread_id')
+      .eq('id', attachment.message_id)
+      .single();
 
-    if (!refreshToken || !gmailMessageId) {
+    if (!message) {
+      return NextResponse.json({ error: 'Message not found' }, { status: 404 });
+    }
+
+    const { data: thread } = await supabase
+      .from('email_threads')
+      .select('inbox_id')
+      .eq('id', message.thread_id)
+      .single();
+
+    if (!thread) {
+      return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
+    }
+
+    const { data: inbox } = await supabase
+      .from('inboxes')
+      .select('google_refresh_token')
+      .eq('id', thread.inbox_id)
+      .single();
+
+    if (!inbox?.google_refresh_token) {
       return NextResponse.json({ error: 'Missing credentials' }, { status: 400 });
     }
 
-    const data = await getAttachment(refreshToken, gmailMessageId, attachment.gmail_attachment_id);
+    const data = await getAttachment(inbox.google_refresh_token, message.gmail_message_id, attachment.gmail_attachment_id);
     const buffer = Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 
     return new NextResponse(buffer, {
