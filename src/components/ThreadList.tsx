@@ -325,14 +325,20 @@ export default function ThreadList({
 
     const threadIds = threadsList.map(t => t.id);
     
-    // Get first message from each thread to get sender email
-    const { data: messages } = await supabase
-      .from('email_messages')
-      .select('thread_id, from_address, from_name')
-      .in('thread_id', threadIds)
-      .order('sent_at', { ascending: true });
+    // Get first message from each thread to get sender email (batched to avoid URL limit)
+    let messages: any[] = [];
+    const batchSize = 50;
+    for (let i = 0; i < threadIds.length; i += batchSize) {
+      const batch = threadIds.slice(i, i + batchSize);
+      const { data: batchData } = await supabase
+        .from('email_messages')
+        .select('thread_id, from_address, from_name')
+        .in('thread_id', batch)
+        .order('sent_at', { ascending: true });
+      if (batchData) messages = [...messages, ...batchData];
+    }
 
-    if (!messages) return;
+    if (!messages.length) return;
 
     // Group by thread, get first message
     const senderByThread: Record<string, { email: string; name: string }> = {};
