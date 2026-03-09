@@ -253,6 +253,8 @@ async function insertMessage(
         mime_type: att.mimeType,
         size: att.size,
         gmail_attachment_id: att.attachmentId,
+        is_inline: att.isInline || false,
+        content_id: att.contentId || null,
       });
     }
   }
