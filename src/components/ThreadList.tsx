@@ -220,6 +220,8 @@ export default function ThreadList({
     // Hide threads assigned to a filtered inbox when viewing parent
     if (!filteredInbox) {
       query = query.is('filtered_inbox_id', null);
+    } else {
+      query = query.eq('filtered_inbox_id', filteredInbox.id);
     }
 
     // Apply filters based on view
