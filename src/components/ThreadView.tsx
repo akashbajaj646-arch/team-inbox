@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
 import type { EmailThread, EmailMessage, ThreadPresence, User, Template } from '@/types';
 import CommentSection from './CommentSection';
@@ -23,16 +22,8 @@ interface SentByUser {
   avatar_url: string | null;
 }
 
-interface EmailAttachment {
-  id: string;
-  filename: string;
-  mime_type: string | null;
-  size: number | null;
-}
-
 interface EmailMessageWithUser extends EmailMessage {
   sent_by?: SentByUser | null;
-  attachments?: EmailAttachment[];
 }
 
 interface ThreadViewProps {
@@ -53,10 +44,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [ccField, setCcField] = useState('');
   const [bccField, setBccField] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [customerSidebarCollapsed, setCustomerSidebarCollapsed] = useState(false);
-  const { elementRef: customerSidebarRef, startResize: startCustomerResize } = useResizable(288, 200, 480, 'customer-sidebar-width');
   const supabase = createClient();
 
   useEffect(() => {
@@ -122,17 +111,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setThread(threadData);
     await loadMessages();
     await loadPresence();
-
-    // Mark as read when opened
-    if (threadData && !threadData.is_read) {
-      await supabase
-        .from('email_threads')
-        .update({ is_read: true })
-        .eq('id', threadId);
-    }
-
     setLoading(false);
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   }
 
   async function loadMessages() {
@@ -145,33 +124,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });
 
-    if (!data) { setMessages([]); return; }
-
-    // Load attachments separately, batch to avoid URL length limits
-    const messageIds = data.map(m => m.id);
-    let attachments: any[] = [];
-    const batchSize = 20;
-    for (let i = 0; i < messageIds.length; i += batchSize) {
-      const batch = messageIds.slice(i, i + batchSize);
-      const { data: batchAttachments } = await supabase
-        .from('email_attachments')
-        .select('id, message_id, filename, mime_type, size, content_id, is_inline')
-        .in('message_id', batch);
-      if (batchAttachments) attachments = [...attachments, ...batchAttachments];
-    }
-
-    const attachmentsByMessage: Record<string, any[]> = {};
-    (attachments || []).forEach(a => {
-      if (!attachmentsByMessage[a.message_id]) attachmentsByMessage[a.message_id] = [];
-      attachmentsByMessage[a.message_id].push(a);
-    });
-
-    const messagesWithAttachments = data.map(m => ({
-      ...m,
-      attachments: attachmentsByMessage[m.id] || [],
-    }));
-
-    setMessages(messagesWithAttachments);
+    setMessages(data || []);
   }
 
   async function loadPresence() {
@@ -389,6 +342,13 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const drafting = presence.filter((p) => p.status === 'drafting');
   const viewing = presence.filter((p) => p.status === 'viewing');
   const senderEmail = messages.find(m => !m.is_outbound)?.from_address || messages[0]?.from_address;
+  const senderName = messages.find(m => !m.is_outbound)?.from_name || messages[0]?.from_name;
+
+  // Priority: customer linked name > sender name > sender email
+  const headerName = customerLinkedName || senderName || senderEmail || '';
+  const headerSubtitle = customerLinkedName
+    ? (senderName ? `${senderName} • ${senderEmail}` : senderEmail)
+    : senderEmail;
 
   return (
     <div className="flex-1 flex flex-row h-screen bg-analog-surface overflow-hidden">
@@ -404,16 +364,17 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3 flex-1">
               <div className="avatar avatar-lg avatar-blue font-display">
-                {messages[messages.length - 1]?.from_name?.charAt(0) || 
-                 messages[messages.length - 1]?.from_address?.charAt(0) || '?'}
+                {headerName.charAt(0).toUpperCase()}
               </div>
               <div>
                 <p className="font-semibold text-[15px] text-analog-text">
-                  {messages[messages.length - 1]?.from_name || messages[messages.length - 1]?.from_address}
+                  {headerName}
                 </p>
-                <p className="text-[13px] text-analog-text-faint">
-                  {messages[messages.length - 1]?.from_address}
-                </p>
+                {headerSubtitle && headerSubtitle !== headerName && (
+                  <p className="text-[13px] text-analog-text-faint">
+                    {headerSubtitle}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -494,30 +455,9 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                 {/* Message Body */}
                 <div className="px-5 py-5 overflow-x-auto">
                   {message.body_html ? (
-                    <iframe
-                      className="email-iframe w-full border-0"
-                      style={{ minHeight: '200px' }}
-                      sandbox="allow-same-origin allow-popups"
-                      srcDoc={(() => {
-                        let html = message.body_html;
-                        if (message.attachments) {
-                          message.attachments.forEach((att: any) => {
-                            if (att.content_id) {
-                              html = html.replace(
-                                new RegExp(`cid:${att.content_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'),
-                                `/api/gmail/attachment?id=${att.id}`
-                              );
-                            }
-                          });
-                        }
-                        return html;
-                      })()}
-                      onLoad={(e) => {
-                        const iframe = e.target as HTMLIFrameElement;
-                        if (iframe.contentDocument) {
-                          iframe.style.height = iframe.contentDocument.body.scrollHeight + 'px';
-                        }
-                      }}
+                    <div
+                      className="email-prose"
+                      dangerouslySetInnerHTML={{ __html: message.body_html }}
                     />
                   ) : (
                     <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
@@ -525,43 +465,14 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                     </p>
                   )}
                 </div>
-
-                {/* Attachments */}
-                {message.attachments && message.attachments.length > 0 && (
-                  <div className="px-5 pb-4 border-t border-analog-border-light pt-3">
-                    <p className="text-xs font-semibold text-analog-text-muted uppercase tracking-wider mb-2">
-                      {message.attachments.length} Attachment{message.attachments.length !== 1 ? 's' : ''}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {message.attachments.map((att: any) => (
-                        <a
-                          key={att.id}
-                          href={`/api/gmail/attachment?id=${att.id}`}
-                          download={att.filename}
-                          className="flex items-center gap-2 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg text-sm hover:border-analog-accent transition-colors group"
-                        >
-                          <svg className="w-4 h-4 text-analog-text-muted group-hover:text-analog-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                          <span className="text-analog-text truncate max-w-[180px]">{att.filename}</span>
-                          {att.size > 0 && (
-                            <span className="text-analog-text-faint text-xs">
-                              ({att.size < 1024 ? att.size + 'B' : att.size < 1048576 ? (att.size/1024).toFixed(0) + 'KB' : (att.size/1048576).toFixed(1) + 'MB'})
-                            </span>
-                          )}
-                          <svg className="w-3.5 h-3.5 text-analog-text-faint group-hover:text-analog-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             ))}
           </div>
 
-          <div ref={messagesEndRef} />
+          {/* Team Discussion */}
+          <div className="max-w-4xl mt-8 pt-6 border-t-2 border-analog-border-strong">
+            <CommentSection threadId={threadId} currentUser={currentUser} />
+          </div>
         </div>
 
         {/* Composer */}
@@ -720,36 +631,11 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
           )}
         </div>
 
-        {/* Team Discussion - fixed at bottom */}
-        <div className="border-t-2 border-analog-border-strong bg-analog-surface px-8 py-4 flex-shrink-0 h-56 overflow-y-auto">
-          <CommentSection threadId={threadId} currentUser={currentUser} />
-        </div>
-
       </div>{/* end main thread column */}
 
-      {/* Right sidebar - collapsible + resizable */}
-      <div className="relative flex flex-shrink-0">
-        {/* Collapse toggle button */}
-        <button
-          onClick={() => setCustomerSidebarCollapsed(!customerSidebarCollapsed)}
-          className="absolute -left-3 top-1/2 -translate-y-1/2 z-20 w-6 h-10 bg-analog-surface border border-analog-border rounded-full flex items-center justify-center text-analog-text-muted hover:text-analog-accent hover:border-analog-accent transition-all shadow-sm"
-          title={customerSidebarCollapsed ? 'Show customer panel' : 'Hide customer panel'}
-        >
-          <svg className={`w-3 h-3 transition-transform ${customerSidebarCollapsed ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-
-        {!customerSidebarCollapsed && (
-          <div ref={customerSidebarRef} className="border-l border-stone-200 bg-white overflow-y-auto px-4 py-5 relative" style={{width: 288}}>
-            {/* Resize handle on left edge */}
-            <div
-              onMouseDown={startCustomerResize}
-              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10"
-            />
-            <CustomerCard email={senderEmail} />
-          </div>
-        )}
+      {/* Right sidebar */}
+      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
+        <CustomerCard email={senderEmail} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
       </div>
 
     </div>
