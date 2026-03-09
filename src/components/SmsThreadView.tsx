@@ -42,6 +42,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   const [editingName, setEditingName] = useState(false);
   const [contactName, setContactName] = useState('');
   const [contactDisplayName, setContactDisplayName] = useState<string | null>(null);
+  const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
   const [showSkuPicker, setShowSkuPicker] = useState(false);
   const [skuSearchQuery, setSkuSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -93,6 +94,33 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
       setThread(data);
       setContactName(data.contact_name || '');
       lookupContact(data.contact_phone);
+      lookupCustomerLink(data.contact_phone);
+    }
+  }
+
+  async function lookupCustomerLink(phone: string) {
+    if (!phone) return;
+    try {
+      const cleanPhone = phone.replace(/\D/g, '');
+      const { data: links } = await supabase
+        .from('thread_customer_links')
+        .select('customer:customers(customer_name)')
+        .not('phone', 'is', null);
+
+      if (links) {
+        for (const link of links) {
+          const linkPhone = (link as any).phone?.replace(/\D/g, '') || '';
+          if (linkPhone === cleanPhone) {
+            const customer = Array.isArray(link.customer) ? link.customer[0] : link.customer;
+            if (customer?.customer_name) {
+              setCustomerLinkedName(customer.customer_name);
+              return;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // Ignore
     }
   }
 
@@ -236,6 +264,12 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
 
   const groupedMessages = groupMessagesByDate(messages);
 
+  // Priority: customer link > contact display name > thread contact name > phone
+  const headerName = customerLinkedName || contactDisplayName || thread.contact_name || formatPhone(thread.contact_phone);
+  const headerSubtitle = (customerLinkedName || contactDisplayName || thread.contact_name)
+    ? formatPhone(thread.contact_phone)
+    : 'SMS Conversation';
+
   return (
     <div className="flex-1 flex flex-row h-screen bg-analog-surface overflow-hidden">
 
@@ -267,7 +301,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
               ) : (
                 <div className="flex items-center gap-2">
                   <h2 className="font-display text-lg font-medium text-analog-text">
-                    {contactDisplayName || thread.contact_name || formatPhone(thread.contact_phone)}
+                    {headerName}
                   </h2>
                   <button
                     onClick={() => setEditingName(true)}
@@ -280,9 +314,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   </button>
                 </div>
               )}
-              <p className="text-sm text-analog-text-faint">
-                {(contactDisplayName || thread.contact_name) ? formatPhone(thread.contact_phone) : 'SMS Conversation'}
-              </p>
+              <p className="text-sm text-analog-text-faint">{headerSubtitle}</p>
             </div>
           </div>
         </div>
@@ -443,7 +475,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
 
       {/* Right sidebar */}
       <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
-        <CustomerCard phone={thread.contact_phone} />
+        <CustomerCard phone={thread.contact_phone} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
       </div>
 
     </div>

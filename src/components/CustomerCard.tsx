@@ -23,11 +23,12 @@ interface Customer {
 interface CustomerCardProps {
   email?: string;
   phone?: string;
+  onCustomerLinked?: (name: string | null) => void;
 }
 
 const ADVANCE_HQ_URL = process.env.NEXT_PUBLIC_ADVANCE_HQ_URL || 'https://advance-hq.vercel.app';
 
-export default function CustomerCard({ email, phone }: CustomerCardProps) {
+export default function CustomerCard({ email, phone, onCustomerLinked }: CustomerCardProps) {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,11 +46,9 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
     loadCustomer();
   }, [email, phone]);
 
-  // Step 1: Check for a saved link, then fall back to auto-match by email/phone
   async function loadCustomer() {
     setLoading(true);
     try {
-      // Check saved link first
       let linkQuery = supabase
         .from('thread_customer_links')
         .select('customer_id');
@@ -64,7 +63,6 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
       const { data: link } = await linkQuery.maybeSingle();
 
       if (link?.customer_id) {
-        // Load the full customer from the saved link
         const { data: savedCustomer } = await supabase
           .from('customers')
           .select('id, customer_name, account_number, email, phone, city, state, country, status, category, credit_limit, is_active, am_customer_id')
@@ -72,12 +70,12 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
           .single();
         if (savedCustomer) {
           setCustomer(savedCustomer);
+          onCustomerLinked?.(savedCustomer.customer_name);
           setLoading(false);
           return;
         }
       }
 
-      // No saved link — try auto-match by email or phone
       let matchQuery = supabase
         .from('customers')
         .select('id, customer_name, account_number, email, phone, city, state, country, status, category, credit_limit, is_active, am_customer_id');
@@ -91,14 +89,15 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
 
       const { data: matched } = await matchQuery.maybeSingle();
       setCustomer(matched || null);
+      onCustomerLinked?.(matched?.customer_name || null);
     } catch {
       setCustomer(null);
+      onCustomerLinked?.(null);
     } finally {
       setLoading(false);
     }
   }
 
-  // Save the link when a customer is manually selected
   async function saveLink(selected: Customer) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -122,6 +121,7 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
     setShowSearch(false);
     setSearchQuery('');
     setSearchResults([]);
+    onCustomerLinked?.(selected.customer_name);
     await saveLink(selected);
   }
 
@@ -137,6 +137,7 @@ export default function CustomerCard({ email, phone }: CustomerCardProps) {
       console.error('Failed to unlink customer:', err);
     }
     setCustomer(null);
+    onCustomerLinked?.(null);
     setShowSearch(true);
   }
 
