@@ -348,6 +348,14 @@ export function extractAttachments(message: GmailMessage): Array<{
 
   if (message.payload?.parts) {
     processParts(message.payload.parts);
+  } else if (message.payload?.filename && message.payload?.body?.attachmentId) {
+    // Single-part message with attachment at top level
+    attachments.push({
+      filename: message.payload.filename,
+      mimeType: message.payload.mimeType || 'application/octet-stream',
+      size: message.payload.body.size || 0,
+      attachmentId: message.payload.body.attachmentId,
+    });
   }
 
   return attachments;
