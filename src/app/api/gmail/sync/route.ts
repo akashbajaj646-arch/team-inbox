@@ -77,7 +77,7 @@ export async function POST(request: Request) {
               .select('id', { count: 'exact', head: true })
               .eq('message_id', messageId);
 
-            if (count === 0) {
+            if (!count) {
               const attachments = extractAttachments(message);
               for (const att of attachments) {
                 await serviceSupabase.from('email_attachments').insert({
