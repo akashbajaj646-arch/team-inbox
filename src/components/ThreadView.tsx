@@ -147,12 +147,18 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
     if (!data) { setMessages([]); return; }
 
-    // Load attachments separately to avoid join failures
+    // Load attachments separately, batch to avoid URL length limits
     const messageIds = data.map(m => m.id);
-    const { data: attachments } = await supabase
-      .from('email_attachments')
-      .select('id, message_id, filename, mime_type, size')
-      .in('message_id', messageIds);
+    let attachments: any[] = [];
+    const batchSize = 20;
+    for (let i = 0; i < messageIds.length; i += batchSize) {
+      const batch = messageIds.slice(i, i + batchSize);
+      const { data: batchAttachments } = await supabase
+        .from('email_attachments')
+        .select('id, message_id, filename, mime_type, size')
+        .in('message_id', batch);
+      if (batchAttachments) attachments = [...attachments, ...batchAttachments];
+    }
 
     const attachmentsByMessage: Record<string, any[]> = {};
     (attachments || []).forEach(a => {
