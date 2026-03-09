@@ -155,7 +155,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       const batch = messageIds.slice(i, i + batchSize);
       const { data: batchAttachments } = await supabase
         .from('email_attachments')
-        .select('id, message_id, filename, mime_type, size')
+        .select('id, message_id, filename, mime_type, size, content_id, is_inline')
         .in('message_id', batch);
       if (batchAttachments) attachments = [...attachments, ...batchAttachments];
     }
@@ -496,7 +496,20 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   {message.body_html ? (
                     <div
                       className="email-prose"
-                      dangerouslySetInnerHTML={{ __html: message.body_html }}
+                      dangerouslySetInnerHTML={{ __html: (() => {
+                        let html = message.body_html;
+                        if (message.attachments) {
+                          message.attachments.forEach((att: any) => {
+                            if (att.content_id) {
+                              html = html.replace(
+                                new RegExp(`cid:${att.content_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'),
+                                `/api/gmail/attachment?id=${att.id}`
+                              );
+                            }
+                          });
+                        }
+                        return html;
+                      })() }}
                     />
                   ) : (
                     <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
