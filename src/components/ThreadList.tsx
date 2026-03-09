@@ -68,7 +68,6 @@ export default function ThreadList({
     };
   }, [inbox.id, filteredInbox?.id, activeView]);
 
-  // Apply search when query changes
   useEffect(() => {
     if (searchQuery.trim()) {
       performSearch();
@@ -88,7 +87,6 @@ export default function ThreadList({
       ? searchQuery.toLowerCase() 
       : searchQuery.toLowerCase();
 
-    // Get thread IDs to search
     const threadIds = threads.map(t => t.id);
     
     if (threadIds.length === 0) {
@@ -97,7 +95,6 @@ export default function ThreadList({
       return;
     }
 
-    // Fetch messages for search
     const { data: messages } = await supabase
       .from('email_messages')
       .select('thread_id, from_address, from_name, body_text, body_html')
@@ -114,7 +111,6 @@ export default function ThreadList({
     const matchingThreads = threads.filter(thread => {
       const threadMessages = messagesByThread[thread.id] || [];
       
-      // Check subject
       const subjectMatch = () => {
         const subject = (thread.subject || '').toLowerCase();
         return searchMatch === 'exact' 
@@ -122,7 +118,6 @@ export default function ThreadList({
           : subject.includes(query);
       };
 
-      // Check from
       const fromMatch = () => {
         return threadMessages.some(m => {
           const from = ((m.from_address || '') + ' ' + (m.from_name || '')).toLowerCase();
@@ -132,7 +127,6 @@ export default function ThreadList({
         });
       };
 
-      // Check body
       const bodyMatch = () => {
         return threadMessages.some(m => {
           const body = ((m.body_text || '') + ' ' + (m.body_html || '')).toLowerCase();
@@ -143,12 +137,9 @@ export default function ThreadList({
       };
 
       switch (searchField) {
-        case 'from':
-          return fromMatch();
-        case 'subject':
-          return subjectMatch();
-        case 'body':
-          return bodyMatch();
+        case 'from': return fromMatch();
+        case 'subject': return subjectMatch();
+        case 'body': return bodyMatch();
         case 'all':
         default:
           return subjectMatch() || fromMatch() || bodyMatch();
@@ -166,7 +157,6 @@ export default function ThreadList({
     setDisplayedThreads(threads);
   }
 
-  // Apply filter rules to check if a thread matches
   function matchesFilter(thread: EmailThread, messages: any[], filter: FilterRule): boolean {
     const value = filter.value.toLowerCase();
     
@@ -217,14 +207,12 @@ export default function ThreadList({
       .eq('inbox_id', inbox.id)
       .order('last_message_at', { ascending: false });
 
-    // Hide threads assigned to a filtered inbox when viewing parent
     if (!filteredInbox) {
       query = query.is('filtered_inbox_id', null);
     } else {
       query = query.eq('filtered_inbox_id', filteredInbox.id);
     }
 
-    // Apply filters based on view
     switch (activeView) {
       case 'all':
         query = query.is('deleted_at', null);
@@ -245,7 +233,6 @@ export default function ThreadList({
 
     const { data } = await query;
     
-    // For 'sent' view, we need to filter threads that have outbound messages
     if (activeView === 'sent' && data) {
       const threadIds = data.map(t => t.id);
       const { data: sentMessages } = await supabase
@@ -257,7 +244,6 @@ export default function ThreadList({
       const sentThreadIds = new Set(sentMessages?.map(m => m.thread_id) || []);
       const filteredData = data.filter(t => sentThreadIds.has(t.id));
       
-      // Apply filtered inbox filters if present
       if (filteredInbox && filteredInbox.filters.length > 0) {
         await applyFilteredInboxFilters(filteredData);
       } else {
@@ -266,7 +252,6 @@ export default function ThreadList({
         loadContactNames(filteredData);
       }
     } else if (filteredInbox && filteredInbox.filters.length > 0 && data) {
-      // Apply filtered inbox filters
       await applyFilteredInboxFilters(data);
     } else {
       setThreads(data || []);
@@ -285,7 +270,6 @@ export default function ThreadList({
       return;
     }
 
-    // Load messages for these threads to check body/from filters
     const threadIds = threadsToFilter.map(t => t.id);
     const { data: messages } = await supabase
       .from('email_messages')
@@ -304,12 +288,10 @@ export default function ThreadList({
       const threadMessages = messagesByThread[thread.id] || [];
       
       if (filteredInbox.filter_logic === 'all') {
-        // ALL filters must match
         return filteredInbox.filters.every(filter => 
           matchesFilter(thread, threadMessages, filter)
         );
       } else {
-        // ANY filter must match
         return filteredInbox.filters.some(filter => 
           matchesFilter(thread, threadMessages, filter)
         );
@@ -321,13 +303,12 @@ export default function ThreadList({
     loadContactNames(matchingThreads);
   }
 
-  // Load contact names for threads
   async function loadContactNames(threadsList: EmailThread[]) {
     if (threadsList.length === 0) return;
 
     const threadIds = threadsList.map(t => t.id);
-    
-    // Get first message from each thread to get sender email (batched to avoid URL limit)
+
+    // Get first inbound message from each thread to find sender email
     let messages: any[] = [];
     const batchSize = 50;
     for (let i = 0; i < threadIds.length; i += batchSize) {
@@ -342,7 +323,6 @@ export default function ThreadList({
 
     if (!messages.length) return;
 
-    // Group by thread, get first message
     const senderByThread: Record<string, { email: string; name: string }> = {};
     messages.forEach(m => {
       if (!senderByThread[m.thread_id]) {
@@ -353,29 +333,57 @@ export default function ThreadList({
       }
     });
 
-    // Get unique emails to lookup
-    const uniqueEmails = [...new Set(Object.values(senderByThread).map(s => s.email).filter(Boolean))];
-    
+    const uniqueEmails = [...new Set(
+      Object.values(senderByThread).map(s => s.email.toLowerCase()).filter(Boolean)
+    )];
+
     if (uniqueEmails.length === 0) return;
 
-    // Batch lookup contacts
+    // Batch lookup saved customer links by email — highest priority
+    const customerNameByEmail = new Map<string, string>();
+    if (uniqueEmails.length > 0) {
+      const { data: links } = await supabase
+        .from('thread_customer_links')
+        .select('email, customer:customers(customer_name)')
+        .not('email', 'is', null);
+
+      if (links) {
+        for (const link of links) {
+          const linkEmail = (link.email || '').toLowerCase();
+          if (linkEmail) {
+            const customer = Array.isArray(link.customer) ? link.customer[0] : link.customer;
+            if (customer?.customer_name) {
+              customerNameByEmail.set(linkEmail, customer.customer_name);
+            }
+          }
+        }
+      }
+    }
+
     const newContactNames = new Map<string, string>();
     
     for (const [threadId, sender] of Object.entries(senderByThread)) {
-      // Check cache first
-      const cacheKey = `email:${sender.email.toLowerCase()}`;
+      const emailLower = sender.email.toLowerCase();
+
+      // Check saved customer link first
+      if (customerNameByEmail.has(emailLower)) {
+        newContactNames.set(threadId, customerNameByEmail.get(emailLower)!);
+        continue;
+      }
+
+      // Check cache
+      const cacheKey = `email:${emailLower}`;
       if (contactCache.has(cacheKey)) {
         const contact = contactCache.get(cacheKey);
         if (contact) {
-          const name = formatContactDisplayName(contact);
-          newContactNames.set(threadId, name);
+          newContactNames.set(threadId, formatContactDisplayName(contact));
         } else {
           newContactNames.set(threadId, sender.name || sender.email);
         }
         continue;
       }
 
-      // Lookup contact
+      // Lookup contact via API
       try {
         const response = await fetch(`/api/contacts?email=${encodeURIComponent(sender.email)}`);
         const data = await response.json();
@@ -383,8 +391,7 @@ export default function ThreadList({
         contactCache.set(cacheKey, contact);
         
         if (contact) {
-          const name = formatContactDisplayName(contact);
-          newContactNames.set(threadId, name);
+          newContactNames.set(threadId, formatContactDisplayName(contact));
         } else {
           newContactNames.set(threadId, sender.name || sender.email);
         }
@@ -470,7 +477,6 @@ export default function ThreadList({
       return;
     }
     
-    // Delete messages first, then thread
     await supabase.from('email_messages').delete().eq('thread_id', threadId);
     await supabase.from('thread_comments').delete().eq('thread_id', threadId);
     await supabase.from('thread_presence').delete().eq('thread_id', threadId);
@@ -595,7 +601,6 @@ export default function ThreadList({
       {/* Search Panel */}
       {showSearch && (
         <div className="px-4 py-3 border-b border-analog-border bg-analog-surface space-y-3">
-          {/* Search Input */}
           <div className="relative">
             <input
               type="text"
@@ -620,7 +625,6 @@ export default function ThreadList({
             )}
           </div>
 
-          {/* Search Options */}
           <div className="flex gap-2">
             <select
               value={searchField}
@@ -642,17 +646,13 @@ export default function ThreadList({
             </select>
           </div>
 
-          {/* Search Status */}
           {searchQuery && (
             <div className="flex items-center justify-between text-xs text-analog-text-faint">
               <span>
                 {searching ? 'Searching...' : `${displayedThreads.length} result${displayedThreads.length !== 1 ? 's' : ''}`}
               </span>
               {searchQuery && (
-                <button
-                  onClick={clearSearch}
-                  className="text-analog-accent hover:underline"
-                >
+                <button onClick={clearSearch} className="text-analog-accent hover:underline">
                   Clear search
                 </button>
               )}
@@ -661,16 +661,12 @@ export default function ThreadList({
         </div>
       )}
 
-      {/* Active Search Indicator (when search panel is closed but search is active) */}
       {!showSearch && searchQuery && (
         <div className="px-4 py-2 border-b border-analog-border bg-analog-accent/10 flex items-center justify-between">
           <span className="text-sm text-analog-accent">
             Searching: "{searchQuery}" ({displayedThreads.length} results)
           </span>
-          <button
-            onClick={clearSearch}
-            className="text-sm text-analog-accent hover:underline"
-          >
+          <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline">
             Clear
           </button>
         </div>
@@ -721,31 +717,22 @@ export default function ThreadList({
               )}
             </p>
             {searchQuery ? (
-              <button
-                onClick={clearSearch}
-                className="text-sm text-analog-accent hover:underline font-medium"
-              >
+              <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline font-medium">
                 Clear search
               </button>
             ) : activeView === 'all' && inbox.google_refresh_token ? (
-              <button
-                onClick={handleSync}
-                className="text-sm text-analog-accent hover:underline font-medium"
-              >
+              <button onClick={handleSync} className="text-sm text-analog-accent hover:underline font-medium">
                 Sync from Gmail
               </button>
             ) : activeView === 'all' && !inbox.google_refresh_token ? (
-              <a
-                href="/api/auth/google"
-                className="text-sm text-analog-accent hover:underline font-medium"
-              >
+              <a href="/api/auth/google" className="text-sm text-analog-accent hover:underline font-medium">
                 Connect Gmail first
               </a>
             ) : null}
           </div>
         ) : (
           <div>
-            {displayedThreads.map((thread, index) => (
+            {displayedThreads.map((thread) => (
               <div
                 key={thread.id}
                 onClick={() => {
@@ -781,8 +768,8 @@ export default function ThreadList({
                     </button>
 
                     <div className="flex-1 min-w-0">
-                      {/* Sender with contact name lookup */}
-                      <div className="text-xs text-analog-text-muted mb-1 truncate">
+                      {/* Sender name — customer name takes priority */}
+                      <div className="text-xs text-analog-text-muted mb-1 truncate font-medium">
                         {contactNames.get(thread.id) || ''}
                       </div>
                       <div className="font-body text-[15px] font-medium text-analog-text mb-1.5 line-clamp-1">

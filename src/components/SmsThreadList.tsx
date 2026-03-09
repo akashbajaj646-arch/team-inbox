@@ -34,7 +34,6 @@ export default function SmsThreadList({
   useEffect(() => {
     loadThreads();
 
-    // Subscribe to real-time updates
     const channel = supabase
       .channel(`sms-threads:${inbox.id}`)
       .on(
@@ -75,15 +74,48 @@ export default function SmsThreadList({
 
     const newContactNames = new Map<string, string>();
 
+    // Collect all unique phones
+    const phones = threadsList.map(t => t.contact_phone).filter(Boolean);
+    const uniquePhones = [...new Set(phones)];
+
+    // Batch lookup saved customer links by phone
+    const customerNameByPhone = new Map<string, string>();
+    if (uniquePhones.length > 0) {
+      // Try each phone variant (raw and digits-only)
+      const { data: links } = await supabase
+        .from('thread_customer_links')
+        .select('phone, customer:customers(customer_name)')
+        .not('phone', 'is', null);
+
+      if (links) {
+        for (const link of links) {
+          const linkPhone = (link.phone || '').replace(/\D/g, '');
+          if (linkPhone) {
+            const customer = Array.isArray(link.customer) ? link.customer[0] : link.customer;
+            if (customer?.customer_name) {
+              customerNameByPhone.set(linkPhone, customer.customer_name);
+            }
+          }
+        }
+      }
+    }
+
     for (const thread of threadsList) {
+      const phone = thread.contact_phone;
+      const cleanPhone = phone.replace(/\D/g, '');
+
+      // Check if we have a saved customer link — highest priority
+      if (customerNameByPhone.has(cleanPhone)) {
+        newContactNames.set(thread.id, customerNameByPhone.get(cleanPhone)!);
+        continue;
+      }
+
       // If thread already has a contact_name set, use that
       if (thread.contact_name) {
         newContactNames.set(thread.id, thread.contact_name);
         continue;
       }
 
-      const phone = thread.contact_phone;
-      const cleanPhone = phone.replace(/\D/g, '');
       const cacheKey = `phone:${cleanPhone}`;
 
       if (smsContactCache.has(cacheKey)) {
@@ -197,8 +229,6 @@ export default function SmsThreadList({
     }
 
     setSyncing(false);
-    
-    // Clear status after 5 seconds
     setTimeout(() => setSyncStatus(null), 5000);
   }
 
@@ -233,7 +263,8 @@ export default function SmsThreadList({
     ? threads.filter(t => 
         t.contact_phone.includes(searchQuery) ||
         t.contact_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.last_message_preview?.toLowerCase().includes(searchQuery.toLowerCase())
+        t.last_message_preview?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        contactNames.get(t.id)?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : threads;
 
@@ -379,78 +410,84 @@ export default function SmsThreadList({
           </div>
         ) : (
           <div>
-            {filteredThreads.map((thread) => (
-              <div
-                key={thread.id}
-                onClick={() => onSelectThread(thread.id)}
-                className={`relative group cursor-pointer transition-all duration-150 ${
-                  selectedThreadId === thread.id
-                    ? 'bg-analog-surface border-l-4 border-l-analog-accent border-y border-y-analog-border-strong'
-                    : 'border-b border-analog-border hover:bg-analog-surface'
-                }`}
-              >
-                <div className="px-6 py-4">
-                  <div className="flex items-start gap-3">
-                    {/* Star button */}
-                    <button
-                      onClick={(e) => handleStar(e, thread.id, thread.is_starred)}
-                      className={`mt-0.5 flex-shrink-0 transition-all duration-150 ${
-                        thread.is_starred
-                          ? 'text-analog-warning'
-                          : 'text-analog-border-strong hover:text-analog-warning opacity-0 group-hover:opacity-100'
-                      }`}
-                    >
-                      <svg 
-                        className="w-4 h-4" 
-                        fill={thread.is_starred ? 'currentColor' : 'none'} 
-                        viewBox="0 0 24 24" 
-                        stroke="currentColor" 
-                        strokeWidth={2}
+            {filteredThreads.map((thread) => {
+              const displayName = contactNames.get(thread.id) || thread.contact_name || formatPhone(thread.contact_phone);
+              const isCustomerLinked = contactNames.get(thread.id) !== undefined;
+
+              return (
+                <div
+                  key={thread.id}
+                  onClick={() => onSelectThread(thread.id)}
+                  className={`relative group cursor-pointer transition-all duration-150 ${
+                    selectedThreadId === thread.id
+                      ? 'bg-analog-surface border-l-4 border-l-analog-accent border-y border-y-analog-border-strong'
+                      : 'border-b border-analog-border hover:bg-analog-surface'
+                  }`}
+                >
+                  <div className="px-6 py-4">
+                    <div className="flex items-start gap-3">
+                      {/* Star button */}
+                      <button
+                        onClick={(e) => handleStar(e, thread.id, thread.is_starred)}
+                        className={`mt-0.5 flex-shrink-0 transition-all duration-150 ${
+                          thread.is_starred
+                            ? 'text-analog-warning'
+                            : 'text-analog-border-strong hover:text-analog-warning opacity-0 group-hover:opacity-100'
+                        }`}
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                      </svg>
-                    </button>
+                        <svg 
+                          className="w-4 h-4" 
+                          fill={thread.is_starred ? 'currentColor' : 'none'} 
+                          viewBox="0 0 24 24" 
+                          stroke="currentColor" 
+                          strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                        </svg>
+                      </button>
 
-                    {/* Message icon / avatar */}
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      !thread.is_read ? 'bg-analog-accent text-white' : 'bg-analog-border text-analog-text-muted'
-                    }`}>
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                      </svg>
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className={`text-sm truncate ${
-                          !thread.is_read ? 'font-semibold text-analog-text' : 'text-analog-text'
-                        }`}>
-                          {contactNames.get(thread.id) || thread.contact_name || formatPhone(thread.contact_phone)}
-                        </h3>
-                        <span className="text-xs text-analog-text-faint whitespace-nowrap">
-                          {formatTime(thread.last_message_at)}
-                        </span>
-                      </div>
-                      {(contactNames.get(thread.id) || thread.contact_name) && (
-                        <p className="text-xs text-analog-text-faint truncate">
-                          {formatPhone(thread.contact_phone)}
-                        </p>
-                      )}
-                      <p className={`text-sm truncate mt-1 ${
-                        !thread.is_read ? 'text-analog-text-secondary' : 'text-analog-text-muted'
+                      {/* Message icon / avatar */}
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        !thread.is_read ? 'bg-analog-accent text-white' : 'bg-analog-border text-analog-text-muted'
                       }`}>
-                        {thread.last_message_preview || 'No messages yet'}
-                      </p>
-                    </div>
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                      </div>
 
-                    {/* Unread indicator */}
-                    {!thread.is_read && (
-                      <div className="w-2 h-2 rounded-full bg-analog-accent flex-shrink-0 mt-2" />
-                    )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className={`text-sm truncate ${
+                            !thread.is_read ? 'font-semibold text-analog-text' : 'text-analog-text'
+                          }`}>
+                            {displayName}
+                          </h3>
+                          <span className="text-xs text-analog-text-faint whitespace-nowrap">
+                            {formatTime(thread.last_message_at)}
+                          </span>
+                        </div>
+                        {/* Show phone number as subtitle when we have a name */}
+                        {(contactNames.get(thread.id) || thread.contact_name) && (
+                          <p className="text-xs text-analog-text-faint truncate">
+                            {formatPhone(thread.contact_phone)}
+                          </p>
+                        )}
+                        <p className={`text-sm truncate mt-1 ${
+                          !thread.is_read ? 'text-analog-text-secondary' : 'text-analog-text-muted'
+                        }`}>
+                          {thread.last_message_preview || 'No messages yet'}
+                        </p>
+                      </div>
+
+                      {/* Unread indicator */}
+                      {!thread.is_read && (
+                        <div className="w-2 h-2 rounded-full bg-analog-accent flex-shrink-0 mt-2" />
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
