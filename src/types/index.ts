@@ -183,23 +183,21 @@ export interface FilteredInbox {
 
 // API types
 
+export interface GmailMessagePart {
+  mimeType: string;
+  filename?: string;
+  headers?: Array<{ name: string; value: string }>;
+  body?: { data?: string; attachmentId?: string; size?: number };
+  parts?: GmailMessagePart[];
+}
+
 export interface GmailMessage {
   id: string;
   threadId: string;
   labelIds: string[];
   snippet: string;
-  payload: {
+  payload: GmailMessagePart & {
     headers: Array<{ name: string; value: string }>;
-    mimeType: string;
-    body?: { data?: string };
-    parts?: Array<{
-      mimeType: string;
-      body?: { data?: string };
-      parts?: Array<{
-        mimeType: string;
-        body?: { data?: string };
-      }>;
-    }>;
   };
   internalDate: string;
 }

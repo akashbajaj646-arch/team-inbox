@@ -87,6 +87,8 @@ export async function POST(request: Request) {
                   mime_type: att.mimeType,
                   size: att.size,
                   gmail_attachment_id: att.attachmentId,
+                  is_inline: att.isInline || false,
+                  content_id: att.contentId || null,
                 });
                 attachmentsSaved++;
               }
@@ -127,6 +129,8 @@ export async function POST(request: Request) {
                 mime_type: att.mimeType,
                 size: att.size,
                 gmail_attachment_id: att.attachmentId,
+                is_inline: att.isInline || false,
+                content_id: att.contentId || null,
               });
               attachmentsSaved++;
             }

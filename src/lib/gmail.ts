@@ -318,26 +318,32 @@ export function extractAttachments(message: GmailMessage): Array<{
   mimeType: string;
   size: number;
   attachmentId: string;
+  isInline?: boolean;
+  contentId?: string;
 }> {
   const attachments: Array<{
     filename: string;
     mimeType: string;
     size: number;
     attachmentId: string;
+    isInline?: boolean;
+    contentId?: string;
   }> = [];
 
   function processParts(parts: any[]) {
     for (const part of parts) {
-      if (
-        part.filename &&
-        part.filename.length > 0 &&
-        part.body?.attachmentId
-      ) {
+      if (part.body?.attachmentId) {
+        // Include both regular and inline attachments
+        const contentDisposition = part.headers?.find((h: any) => h.name.toLowerCase() === 'content-disposition')?.value || '';
+        const contentId = part.headers?.find((h: any) => h.name.toLowerCase() === 'content-id')?.value || '';
+        const filename = part.filename || contentId.replace(/[<>]/g, '') || `attachment.${part.mimeType?.split('/')[1] || 'bin'}`;
         attachments.push({
-          filename: part.filename,
+          filename,
           mimeType: part.mimeType || 'application/octet-stream',
           size: part.body.size || 0,
           attachmentId: part.body.attachmentId,
+          isInline: contentDisposition.includes('inline') || (!!contentId && !part.filename),
+          contentId: contentId.replace(/[<>]/g, ''),
         });
       }
       if (part.parts) {
