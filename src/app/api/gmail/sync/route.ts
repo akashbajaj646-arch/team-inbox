@@ -118,6 +118,7 @@ export async function POST(request: Request) {
           // Save attachments for new message
           if (insertedMessage) {
             const attachments = extractAttachments(message);
+            console.log('DEBUG message id:', message.id, 'payload parts:', JSON.stringify(message.payload?.parts?.map((p: any) => ({ mimeType: p.mimeType, filename: p.filename, hasAttachmentId: !!p.body?.attachmentId, subparts: p.parts?.length })))); 
             for (const att of attachments) {
               await serviceSupabase.from('email_attachments').insert({
                 message_id: insertedMessage.id,
