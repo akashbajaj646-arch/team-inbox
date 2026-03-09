@@ -132,7 +132,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       .from('email_messages')
       .select(`
         *,
-        sent_by:inbox_users(id, name, email, avatar_url)
+        sent_by:inbox_users(id, name, email, avatar_url),
+        attachments:email_attachments(id, filename, mime_type, size)
       `)
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });
@@ -470,6 +471,38 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                     </p>
                   )}
                 </div>
+
+                {/* Attachments */}
+                {message.attachments && message.attachments.length > 0 && (
+                  <div className="px-5 pb-4 border-t border-analog-border-light pt-3">
+                    <p className="text-xs font-semibold text-analog-text-muted uppercase tracking-wider mb-2">
+                      {message.attachments.length} Attachment{message.attachments.length !== 1 ? 's' : ''}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {message.attachments.map((att: any) => (
+                        <a
+                          key={att.id}
+                          href={`/api/gmail/attachment?id=${att.id}`}
+                          download={att.filename}
+                          className="flex items-center gap-2 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg text-sm hover:border-analog-accent transition-colors group"
+                        >
+                          <svg className="w-4 h-4 text-analog-text-muted group-hover:text-analog-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                          </svg>
+                          <span className="text-analog-text truncate max-w-[180px]">{att.filename}</span>
+                          {att.size > 0 && (
+                            <span className="text-analog-text-faint text-xs">
+                              ({att.size < 1024 ? att.size + 'B' : att.size < 1048576 ? (att.size/1024).toFixed(0) + 'KB' : (att.size/1048576).toFixed(1) + 'MB'})
+                            </span>
+                          )}
+                          <svg className="w-3.5 h-3.5 text-analog-text-faint group-hover:text-analog-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

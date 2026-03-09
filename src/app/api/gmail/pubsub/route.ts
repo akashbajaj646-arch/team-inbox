@@ -6,6 +6,7 @@ import {
   parseHeaders,
   parseEmailAddress,
   extractBody,
+  extractAttachments,
 } from '@/lib/gmail';
 
 /**
@@ -228,7 +229,7 @@ async function insertMessage(
 
   const isOutbound = from.address.toLowerCase() === inboxEmail.toLowerCase();
 
-  await supabase.from('email_messages').insert({
+  const { data: insertedMessage } = await supabase.from('email_messages').insert({
     thread_id: threadId,
     gmail_message_id: message.id,
     from_address: from.address,
@@ -239,5 +240,20 @@ async function insertMessage(
     body_text: body.text,
     sent_at: new Date(parseInt(message.internalDate)).toISOString(),
     is_outbound: isOutbound,
-  });
+  }).select().single();
+
+  // Save attachments
+  if (insertedMessage) {
+    const attachments = extractAttachments(message);
+    for (const att of attachments) {
+      await supabase.from('email_attachments').insert({
+        message_id: insertedMessage.id,
+        thread_id: threadId,
+        filename: att.filename,
+        mime_type: att.mimeType,
+        size: att.size,
+        gmail_attachment_id: att.attachmentId,
+      });
+    }
+  }
 }

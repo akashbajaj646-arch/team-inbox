@@ -311,3 +311,59 @@ export async function archiveThread(refreshToken: string, threadId: string) {
     },
   });
 }
+
+// Extract attachments from message parts
+export function extractAttachments(message: GmailMessage): Array<{
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+}> {
+  const attachments: Array<{
+    filename: string;
+    mimeType: string;
+    size: number;
+    attachmentId: string;
+  }> = [];
+
+  function processParts(parts: any[]) {
+    for (const part of parts) {
+      if (
+        part.filename &&
+        part.filename.length > 0 &&
+        part.body?.attachmentId
+      ) {
+        attachments.push({
+          filename: part.filename,
+          mimeType: part.mimeType || 'application/octet-stream',
+          size: part.body.size || 0,
+          attachmentId: part.body.attachmentId,
+        });
+      }
+      if (part.parts) {
+        processParts(part.parts);
+      }
+    }
+  }
+
+  if (message.payload?.parts) {
+    processParts(message.payload.parts);
+  }
+
+  return attachments;
+}
+
+// Download attachment data from Gmail
+export async function getAttachment(
+  refreshToken: string,
+  messageId: string,
+  attachmentId: string
+): Promise<string> {
+  const gmail = createGmailClient(refreshToken);
+  const response = await gmail.users.messages.attachments.get({
+    userId: 'me',
+    messageId,
+    id: attachmentId,
+  });
+  return response.data.data || '';
+}
