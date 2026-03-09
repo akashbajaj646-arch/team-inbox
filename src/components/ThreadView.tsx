@@ -23,8 +23,16 @@ interface SentByUser {
   avatar_url: string | null;
 }
 
+interface EmailAttachment {
+  id: string;
+  filename: string;
+  mime_type: string | null;
+  size: number | null;
+}
+
 interface EmailMessageWithUser extends EmailMessage {
   sent_by?: SentByUser | null;
+  attachments?: EmailAttachment[];
 }
 
 interface ThreadViewProps {
