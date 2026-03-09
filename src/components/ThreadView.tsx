@@ -140,13 +140,32 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       .from('email_messages')
       .select(`
         *,
-        sent_by:inbox_users(id, name, email, avatar_url),
-        attachments:email_attachments(id, filename, mime_type, size)
+        sent_by:inbox_users(id, name, email, avatar_url)
       `)
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });
 
-    setMessages(data || []);
+    if (!data) { setMessages([]); return; }
+
+    // Load attachments separately to avoid join failures
+    const messageIds = data.map(m => m.id);
+    const { data: attachments } = await supabase
+      .from('email_attachments')
+      .select('id, message_id, filename, mime_type, size')
+      .in('message_id', messageIds);
+
+    const attachmentsByMessage: Record<string, any[]> = {};
+    (attachments || []).forEach(a => {
+      if (!attachmentsByMessage[a.message_id]) attachmentsByMessage[a.message_id] = [];
+      attachmentsByMessage[a.message_id].push(a);
+    });
+
+    const messagesWithAttachments = data.map(m => ({
+      ...m,
+      attachments: attachmentsByMessage[m.id] || [],
+    }));
+
+    setMessages(messagesWithAttachments);
   }
 
   async function loadPresence() {
