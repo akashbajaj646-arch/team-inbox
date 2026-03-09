@@ -41,8 +41,8 @@ export async function POST(request: Request) {
 
     const twilioClient = twilio(inbox.twilio_account_sid, inbox.twilio_auth_token);
 
-    // Deep sync looks back 400 days, regular sync 30 days
-    const lookbackDays = deepSync ? 400 : 30;
+    // Deep sync looks back 1825 days (5 years), regular sync 30 days
+    const lookbackDays = deepSync ? 1825 : 30;
     const lookbackDate = new Date();
     lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
 
