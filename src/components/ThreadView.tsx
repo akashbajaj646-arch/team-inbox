@@ -494,9 +494,11 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                 {/* Message Body */}
                 <div className="px-5 py-5 overflow-x-auto">
                   {message.body_html ? (
-                    <div
-                      className="email-prose"
-                      dangerouslySetInnerHTML={{ __html: (() => {
+                    <iframe
+                      className="email-iframe w-full border-0"
+                      style={{ minHeight: '200px' }}
+                      sandbox="allow-same-origin allow-popups"
+                      srcDoc={(() => {
                         let html = message.body_html;
                         if (message.attachments) {
                           message.attachments.forEach((att: any) => {
@@ -509,8 +511,13 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                           });
                         }
                         return html;
-                      })() }}
-                    />
+                      })()}
+                      onLoad={(e) => {
+                        const iframe = e.target as HTMLIFrameElement;
+                        if (iframe.contentDocument) {
+                          iframe.style.height = iframe.contentDocument.body.scrollHeight + 'px';
+                        }
+                      }}
                   ) : (
                     <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
                       {message.body_text}
