@@ -12,10 +12,10 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const serviceSupabase = await createServiceClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized', step: 'auth' }, { status: 401 });
 
-    const { data: membership } = await serviceSupabase.from('inbox_members').select('*').eq('inbox_id', inboxId).eq('user_id', user.id).single();
-    if (!membership) return NextResponse.json({ error: 'Access denied', userId: user.id, inboxId }, { status: 403 });
+    const { data: membership, error: membershipError } = await serviceSupabase.from('inbox_members').select('*').eq('inbox_id', inboxId).eq('user_id', user.id).single();
+    if (!membership) return NextResponse.json({ error: 'Access denied', userId: user.id, inboxId, membershipError: membershipError?.message }, { status: 403 });
 
     const { data: inbox } = await serviceSupabase.from('inboxes').select('*').eq('id', inboxId).single();
     if (!inbox?.google_refresh_token) return NextResponse.json({ error: 'Gmail not configured' }, { status: 400 });
