@@ -518,6 +518,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                           iframe.style.height = iframe.contentDocument.body.scrollHeight + 'px';
                         }
                       }}
+                    />
                   ) : (
                     <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
                       {message.body_text}
