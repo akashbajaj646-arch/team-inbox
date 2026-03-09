@@ -270,12 +270,18 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ applied: 0 });
     }
 
-    // Fetch messages for matching
+    // Fetch messages for matching (batched to avoid URL length limit)
     const threadIds = threads.map((t: any) => t.id);
-    const { data: messages } = await supabase
-      .from('email_messages')
-      .select('thread_id, from_address, from_name, body_text')
-      .in('thread_id', threadIds);
+    let messages: any[] = [];
+    const batchSize = 50;
+    for (let i = 0; i < threadIds.length; i += batchSize) {
+      const batch = threadIds.slice(i, i + batchSize);
+      const { data: batchData } = await supabase
+        .from('email_messages')
+        .select('thread_id, from_address, from_name, body_text')
+        .in('thread_id', batch);
+      if (batchData) messages = [...messages, ...batchData];
+    }
 
     const messagesByThread: Record<string, any[]> = {};
     (messages || []).forEach((m: any) => {
