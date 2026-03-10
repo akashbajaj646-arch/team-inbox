@@ -113,11 +113,20 @@ export default function CustomerCard({ email, phone, onCustomerLinked }: Custome
   }
 
   async function loadOrdersAndProducts(customerId: string) {
+    // Resolve apparel_magic_customer_id
+    const { data: customerData } = await supabase
+      .from('customers')
+      .select('am_customer_id')
+      .eq('id', customerId)
+      .single();
+    const amId = customerData?.am_customer_id;
+    if (!amId) return;
+
     // 5 most recent orders
     const { data: recentOrders } = await supabase
       .from('orders')
       .select('id, apparel_magic_id, order_number, order_date, order_status, total_amount, ship_to_name, ship_to_address_1, ship_to_address_2, ship_to_city, ship_to_state, ship_to_zip')
-      .eq('customer_id', customerId)
+      .eq('apparel_magic_customer_id', amId)
       .order('order_date', { ascending: false })
       .limit(5);
 
@@ -131,7 +140,7 @@ export default function CustomerCard({ email, phone, onCustomerLinked }: Custome
       const { data: allOrders } = await supabase
         .from('orders')
         .select('id')
-        .eq('customer_id', customerId);
+        .eq('apparel_magic_customer_id', amId);
 
       const allOrderIds = allOrders?.map(o => o.id) || [];
 
