@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { Inbox, User } from '@/types';
 
 interface ComposeModalProps {
@@ -15,32 +15,40 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const isSms = inbox.inbox_type === 'sms';
   const isWhatsApp = inbox.inbox_type === 'whatsapp';
 
-  // Email fields
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
   const [showCc, setShowCc] = useState(false);
   const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-
-  // SMS / WhatsApp fields
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
-
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [smsMedia, setSmsMedia] = useState<File | null>(null);
+  const [smsMediaPreview, setSmsMediaPreview] = useState<string | null>(null);
+  const [fontSize, setFontSize] = useState('3');
+
+  const editorRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const smsFileInputRef = useRef<HTMLInputElement>(null);
+
+  function execCmd(command: string, value?: string) {
+    editorRef.current?.focus();
+    document.execCommand(command, false, value);
+  }
 
   async function handleSend() {
     setError(null);
     setSending(true);
-
     try {
       if (isEmail) {
-        if (!to.trim() || !subject.trim() || !body.trim()) {
+        const bodyHtml = editorRef.current?.innerHTML || '';
+        const bodyText = editorRef.current?.innerText || '';
+        if (!to.trim() || !subject.trim() || !bodyText.trim()) {
           setError('To, Subject, and Body are required.');
           setSending(false);
           return;
         }
-
         const res = await fetch('/api/emails/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -49,40 +57,49 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
             to: to.trim(),
             cc: cc.trim() || undefined,
             subject: subject.trim(),
-            body,
+            body: bodyHtml,
             isNew: true,
           }),
         });
-
         if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Failed to send email');
+          const d = await res.json();
+          throw new Error(d.error || 'Failed to send email');
         }
       } else {
-        // SMS or WhatsApp
-        if (!phone.trim() || !message.trim()) {
-          setError('Phone number and message are required.');
+        if (!phone.trim() || (!message.trim() && !smsMedia)) {
+          setError('Phone number and message or media are required.');
           setSending(false);
           return;
         }
-
+        let mediaUrls: string[] = [];
+        if (smsMedia) {
+          const { createClient } = await import('@/lib/supabase/client');
+          const supabase = createClient();
+          const ext = smsMedia.name.split('.').pop();
+          const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from('sms-media')
+            .upload(filename, smsMedia, { contentType: smsMedia.type, upsert: false });
+          if (uploadError) throw new Error('Failed to upload image');
+          const { data: { publicUrl } } = supabase.storage.from('sms-media').getPublicUrl(filename);
+          mediaUrls = [publicUrl];
+        }
         const res = await fetch('/api/sms/send-new', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             inboxId: inbox.id,
             toPhone: phone.trim(),
-            body: message.trim(),
+            body: message.trim() || undefined,
+            mediaUrls: mediaUrls.length ? mediaUrls : undefined,
             channel: isWhatsApp ? 'whatsapp' : 'sms',
           }),
         });
-
         if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Failed to send message');
+          const d = await res.json();
+          throw new Error(d.error || 'Failed to send message');
         }
       }
-
       onSent?.();
       onClose();
     } catch (err: any) {
@@ -110,14 +127,9 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-end p-6 pointer-events-none">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto" onClick={onClose} />
+      <div className="relative pointer-events-auto w-[620px] max-h-[85vh] bg-analog-surface border-2 border-analog-border-strong rounded-2xl shadow-2xl flex flex-col overflow-hidden">
 
-      {/* Modal */}
-      <div className="relative pointer-events-auto w-[560px] max-h-[80vh] bg-analog-surface border-2 border-analog-border-strong rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-analog-border bg-analog-surface-alt">
           <div className="flex items-center gap-2.5">
@@ -129,10 +141,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
               <p className="text-xs text-analog-text-faint">{inbox.name}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-analog-text-muted hover:text-analog-text hover:bg-analog-hover transition-all"
-          >
+          <button onClick={onClose} className="p-1.5 rounded-lg text-analog-text-muted hover:text-analog-text hover:bg-analog-hover transition-all">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -143,6 +152,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
         <div className="flex-1 overflow-y-auto">
           {isEmail ? (
             <div className="divide-y divide-analog-border">
+
               {/* To */}
               <div className="flex items-center gap-3 px-5 py-3">
                 <span className="text-xs font-semibold text-analog-text-faint w-12 flex-shrink-0">To</span>
@@ -155,12 +165,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                   autoFocus
                 />
                 {!showCc && (
-                  <button
-                    onClick={() => setShowCc(true)}
-                    className="text-xs text-analog-text-faint hover:text-analog-accent transition-colors"
-                  >
-                    Cc
-                  </button>
+                  <button onClick={() => setShowCc(true)} className="text-xs text-analog-text-faint hover:text-analog-accent transition-colors">Cc</button>
                 )}
               </div>
 
@@ -191,15 +196,149 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                 />
               </div>
 
-              {/* Body */}
-              <div className="px-5 py-4 min-h-[200px]">
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  placeholder="Write your message..."
-                  className="w-full h-48 bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none resize-none leading-relaxed"
+              {/* Toolbar */}
+              <div className="flex items-center gap-1 px-4 py-2 bg-analog-surface-alt border-b border-analog-border flex-wrap">
+                <select
+                  value={fontSize}
+                  onChange={(e) => { setFontSize(e.target.value); execCmd('fontSize', e.target.value); }}
+                  className="text-xs bg-transparent border border-analog-border rounded px-1.5 py-1 text-analog-text-muted focus:outline-none cursor-pointer mr-1"
+                >
+                  <option value="1">Small</option>
+                  <option value="3">Normal</option>
+                  <option value="4">Large</option>
+                  <option value="5">X-Large</option>
+                </select>
+
+                <div className="w-px h-5 bg-analog-border mx-1" />
+
+                <button
+                  onClick={() => execCmd('bold')}
+                  title="Bold"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors font-bold text-sm"
+                >B</button>
+
+                <button
+                  onClick={() => execCmd('italic')}
+                  title="Italic"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors italic text-sm"
+                >I</button>
+
+                <button
+                  onClick={() => execCmd('underline')}
+                  title="Underline"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors underline text-sm"
+                >U</button>
+
+                <div className="w-px h-5 bg-analog-border mx-1" />
+
+                <button
+                  onClick={() => execCmd('insertUnorderedList')}
+                  title="Bullet list"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <line x1="8" y1="6" x2="21" y2="6"/>
+                    <line x1="8" y1="12" x2="21" y2="12"/>
+                    <line x1="8" y1="18" x2="21" y2="18"/>
+                    <line x1="3" y1="6" x2="3.01" y2="6"/>
+                    <line x1="3" y1="12" x2="3.01" y2="12"/>
+                    <line x1="3" y1="18" x2="3.01" y2="18"/>
+                  </svg>
+                </button>
+
+                <button
+                  onClick={() => execCmd('insertOrderedList')}
+                  title="Numbered list"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <line x1="10" y1="6" x2="21" y2="6"/>
+                    <line x1="10" y1="12" x2="21" y2="12"/>
+                    <line x1="10" y1="18" x2="21" y2="18"/>
+                    <path d="M4 6h1v4"/>
+                    <path d="M4 10h2"/>
+                    <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>
+                  </svg>
+                </button>
+
+                <div className="w-px h-5 bg-analog-border mx-1" />
+
+                <button
+                  onClick={() => execCmd('justifyLeft')}
+                  title="Align left"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <line x1="3" y1="6" x2="21" y2="6"/>
+                    <line x1="3" y1="12" x2="15" y2="12"/>
+                    <line x1="3" y1="18" x2="18" y2="18"/>
+                  </svg>
+                </button>
+
+                <button
+                  onClick={() => execCmd('justifyCenter')}
+                  title="Align center"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <line x1="3" y1="6" x2="21" y2="6"/>
+                    <line x1="6" y1="12" x2="18" y2="12"/>
+                    <line x1="4" y1="18" x2="20" y2="18"/>
+                  </svg>
+                </button>
+
+                <div className="w-px h-5 bg-analog-border mx-1" />
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach file"
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    setAttachments(prev => [...prev, ...Array.from(e.target.files || [])]);
+                    e.target.value = '';
+                  }}
                 />
               </div>
+
+              {/* Rich text editor */}
+              <div className="px-5 py-4 min-h-[200px]">
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  className="w-full min-h-[180px] bg-transparent text-sm text-analog-text focus:outline-none leading-relaxed"
+                  style={{ wordBreak: 'break-word' }}
+                  data-placeholder="Write your message..."
+                />
+              </div>
+
+              {/* Attachment list */}
+              {attachments.length > 0 && (
+                <div className="px-5 py-3 border-t border-analog-border flex flex-wrap gap-2">
+                  {attachments.map((f, i) => (
+                    <div key={i} className="flex items-center gap-1.5 bg-analog-surface-alt border border-analog-border rounded-lg px-2.5 py-1.5 text-xs text-analog-text-muted">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span className="max-w-[120px] truncate">{f.name}</span>
+                      <button
+                        onClick={() => setAttachments(prev => prev.filter((_, j) => j !== i))}
+                        className="text-analog-text-faint hover:text-red-500 ml-0.5"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="divide-y divide-analog-border">
@@ -218,11 +357,20 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
 
               {/* Message */}
               <div className="px-5 py-4 min-h-[200px]">
+                {smsMediaPreview && (
+                  <div className="mb-3 relative inline-block">
+                    <img src={smsMediaPreview} alt="Preview" className="h-20 rounded-lg border border-analog-border" />
+                    <button
+                      onClick={() => { setSmsMedia(null); setSmsMediaPreview(null); }}
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+                    >×</button>
+                  </div>
+                )}
                 <textarea
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder={`Write your ${channelLabel} message...`}
-                  className="w-full h-48 bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none resize-none leading-relaxed"
+                  className="w-full h-40 bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none resize-none leading-relaxed"
                 />
                 {isWhatsApp && (
                   <p className="text-xs text-analog-text-faint mt-2">
@@ -236,18 +384,36 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
 
         {/* Footer */}
         <div className="px-5 py-4 border-t border-analog-border bg-analog-surface-alt flex items-center justify-between">
-          {error ? (
-            <p className="text-sm text-red-500">{error}</p>
-          ) : (
-            <div />
-          )}
           <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-analog-text-muted hover:text-analog-text transition-colors"
-            >
-              Discard
-            </button>
+            {error ? (
+              <p className="text-sm text-red-500">{error}</p>
+            ) : isSms ? (
+              <>
+                <input
+                  ref={smsFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) { setSmsMedia(f); setSmsMediaPreview(URL.createObjectURL(f)); }
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  onClick={() => smsFileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-analog-text-muted border border-analog-border rounded-lg hover:bg-analog-hover transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                  Attach Image
+                </button>
+              </>
+            ) : <div />}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-analog-text-muted hover:text-analog-text transition-colors">Discard</button>
             <button
               onClick={handleSend}
               disabled={sending}
@@ -273,6 +439,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           </div>
         </div>
       </div>
+      <style>{`[contenteditable]:empty:before{content:attr(data-placeholder);color:#aaa;pointer-events:none;}`}</style>
     </div>
   );
 }
