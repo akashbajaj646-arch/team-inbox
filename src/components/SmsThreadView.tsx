@@ -45,6 +45,9 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
   const [showSkuPicker, setShowSkuPicker] = useState(false);
   const [skuSearchQuery, setSkuSearchQuery] = useState('');
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
@@ -163,17 +166,38 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   }
 
   async function handleSend() {
-    if (!newMessage.trim() || sending) return;
+    if (!newMessage.trim() && !mediaFile || sending) return;
     setSending(true);
+
+    let mediaUrls: string[] = [];
+
+    if (mediaFile) {
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+      const ext = mediaFile.name.split('.').pop();
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('sms-media')
+        .upload(filename, mediaFile, { contentType: mediaFile.type, upsert: false });
+      if (uploadError) {
+        alert('Failed to upload image');
+        setSending(false);
+        return;
+      }
+      const { data: { publicUrl } } = supabase.storage.from('sms-media').getPublicUrl(filename);
+      mediaUrls = [publicUrl];
+    }
 
     const response = await fetch('/api/sms/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threadId, body: newMessage.trim() }),
+      body: JSON.stringify({ threadId, body: newMessage.trim() || undefined, mediaUrls: mediaUrls.length ? mediaUrls : undefined }),
     });
 
     if (response.ok) {
       setNewMessage('');
+      setMediaFile(null);
+      setMediaPreview(null);
       loadMessages();
     } else {
       const data = await response.json();
@@ -418,7 +442,39 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
         {/* Composer */}
         <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-6 py-4">
           <div className="max-w-2xl mx-auto relative">
+            {mediaPreview && (
+              <div className="mb-2 relative inline-block">
+                <img src={mediaPreview} alt="Attachment preview" className="h-20 rounded-lg border border-analog-border" />
+                <button
+                  onClick={() => { setMediaFile(null); setMediaPreview(null); }}
+                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+                >×</button>
+              </div>
+            )}
             <div className="flex items-end gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setMediaFile(file);
+                    setMediaPreview(URL.createObjectURL(file));
+                  }
+                  e.target.value = '';
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-analog-border text-analog-text-muted hover:bg-analog-surface-alt transition-colors"
+                title="Attach image"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                </svg>
+              </button>
               <div className="flex-1 relative">
                 <textarea
                   ref={textareaRef}
@@ -450,7 +506,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
               </div>
               <button
                 onClick={handleSend}
-                disabled={!newMessage.trim() || sending}
+                disabled={(!newMessage.trim() && !mediaFile) || sending}
                 className="btn btn-primary disabled:opacity-50"
               >
                 {sending ? (
