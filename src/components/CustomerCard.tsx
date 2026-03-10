@@ -259,7 +259,7 @@ export default function CustomerCard({ email, phone, onCustomerLinked }: Custome
         </div>
 
         <a
-          href={`${ADVANCE_HQ_URL}/customers/${customer.id}`}
+          href={`${ADVANCE_HQ_URL}/customers/${customer.am_customer_id}`}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-2 w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#c17f6b] hover:bg-[#b06d5a] text-white text-xs font-medium transition-colors group"
