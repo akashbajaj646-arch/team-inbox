@@ -10,9 +10,6 @@ interface SmsThreadListProps {
   onSelectThread: (threadId: string) => void;
 }
 
-// Contact cache for SMS
-const smsContactCache: Map<string, Contact | null> = new Map();
-
 export default function SmsThreadList({
   inbox,
   selectedThreadId,
@@ -74,98 +71,73 @@ export default function SmsThreadList({
 
     const newContactNames = new Map<string, string>();
 
-    // Collect all unique phones
+    // Collect all unique phones (digits only)
     const phones = threadsList.map(t => t.contact_phone).filter(Boolean);
-    const uniquePhones = [...new Set(phones)];
+    const uniquePhones = [...new Set(phones.map(p => p.replace(/\D/g, '')))];
 
-    // Batch lookup saved customer links by phone
+    // Single bulk query for all customer links
+    const { data: links } = await supabase
+      .from('thread_customer_links')
+      .select('phone, customer:customers(customer_name)')
+      .not('phone', 'is', null);
+
+    // Build a map of digits-only phone -> customer name
     const customerNameByPhone = new Map<string, string>();
-    if (uniquePhones.length > 0) {
-      // Try each phone variant (raw and digits-only)
-      const { data: links } = await supabase
-        .from('thread_customer_links')
-        .select('phone, customer:customers(customer_name)')
-        .not('phone', 'is', null);
-
-      if (links) {
-        for (const link of links) {
-          const linkPhone = (link.phone || '').replace(/\D/g, '');
-          if (linkPhone) {
-            const customer = Array.isArray(link.customer) ? link.customer[0] : link.customer;
-            if (customer?.customer_name) {
-              customerNameByPhone.set(linkPhone, customer.customer_name);
-            }
+    if (links) {
+      for (const link of links) {
+        const linkPhone = ((link as any).phone || '').replace(/\D/g, '');
+        if (linkPhone) {
+          const customer = Array.isArray(link.customer) ? link.customer[0] : link.customer;
+          if (customer?.customer_name) {
+            customerNameByPhone.set(linkPhone, customer.customer_name);
           }
         }
       }
     }
 
-    for (const thread of threadsList) {
-      const phone = thread.contact_phone;
-      const cleanPhone = phone.replace(/\D/g, '');
+    // Single bulk query for all contacts by phone
+    const contactNameByPhone = new Map<string, string>();
+    if (uniquePhones.length > 0) {
+      const { data: contacts } = await supabase
+        .from('inbox_contacts')
+        .select('phone, first_name, last_name, company_name')
+        .not('phone', 'is', null);
 
-      // Check if we have a saved customer link — highest priority
+      if (contacts) {
+        for (const contact of contacts) {
+          const contactPhone = (contact.phone || '').replace(/\D/g, '');
+          if (contactPhone && uniquePhones.includes(contactPhone)) {
+            const parts = [];
+            if (contact.first_name) parts.push(contact.first_name);
+            if (contact.last_name) parts.push(contact.last_name);
+            const name = parts.join(' ');
+            const displayName = name && contact.company_name
+              ? `${name} (${contact.company_name})`
+              : name || contact.company_name || '';
+            if (displayName) contactNameByPhone.set(contactPhone, displayName);
+          }
+        }
+      }
+    }
+
+    // Now resolve each thread name in priority order
+    for (const thread of threadsList) {
+      const cleanPhone = thread.contact_phone.replace(/\D/g, '');
+
       if (customerNameByPhone.has(cleanPhone)) {
         newContactNames.set(thread.id, customerNameByPhone.get(cleanPhone)!);
-        continue;
-      }
-
-      // If thread already has a contact_name set, use that
-      if (thread.contact_name) {
+      } else if (thread.contact_name) {
         newContactNames.set(thread.id, thread.contact_name);
-        continue;
-      }
-
-      const cacheKey = `phone:${cleanPhone}`;
-
-      if (smsContactCache.has(cacheKey)) {
-        const contact = smsContactCache.get(cacheKey);
-        if (contact) {
-          const name = formatContactDisplayName(contact);
-          newContactNames.set(thread.id, name);
-        }
-        continue;
-      }
-
-      // Lookup contact by phone
-      try {
-        const response = await fetch(`/api/contacts?phone=${encodeURIComponent(phone)}`);
-        const data = await response.json();
-        const contact = data.contact || null;
-        smsContactCache.set(cacheKey, contact);
-        
-        if (contact) {
-          const name = formatContactDisplayName(contact);
-          newContactNames.set(thread.id, name);
-        }
-      } catch (err) {
-        // Ignore errors
+      } else if (contactNameByPhone.has(cleanPhone)) {
+        newContactNames.set(thread.id, contactNameByPhone.get(cleanPhone)!);
       }
     }
 
-    setContactNames(prev => {
-      const merged = new Map(Array.from(prev.entries()).concat(Array.from(newContactNames.entries())));
-      return merged;
-    });
-  }
-
-  function formatContactDisplayName(contact: Contact): string {
-    const parts = [];
-    if (contact.first_name) parts.push(contact.first_name);
-    if (contact.last_name) parts.push(contact.last_name);
-    
-    const name = parts.join(' ');
-    
-    if (name && contact.company_name) {
-      return `${name} (${contact.company_name})`;
-    }
-    
-    return name || contact.company_name || '';
+    setContactNames(newContactNames);
   }
 
   async function handleCreateThread() {
     if (!newPhone.trim()) return;
-    
     setCreating(true);
     
     const response = await fetch('/api/sms/threads', {
@@ -255,12 +227,11 @@ export default function SmsThreadList({
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
-    
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
   const filteredThreads = searchQuery
-    ? threads.filter(t => 
+    ? threads.filter(t =>
         t.contact_phone.includes(searchQuery) ||
         t.contact_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.last_message_preview?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -317,18 +288,16 @@ export default function SmsThreadList({
         </div>
       </div>
 
-      {/* Sync Status */}
       {syncStatus && (
         <div className={`px-4 py-2 text-sm border-b border-analog-border ${
-          syncStatus.startsWith('Error') 
-            ? 'bg-analog-error/10 text-analog-error' 
+          syncStatus.startsWith('Error')
+            ? 'bg-analog-error/10 text-analog-error'
             : 'bg-analog-accent/10 text-analog-accent'
         }`}>
           {syncStatus}
         </div>
       )}
 
-      {/* Search Panel */}
       {showSearch && (
         <div className="px-4 py-3 border-b border-analog-border bg-analog-surface">
           <div className="relative">
@@ -347,45 +316,24 @@ export default function SmsThreadList({
         </div>
       )}
 
-      {/* New Thread Modal */}
       {showNewThread && (
         <div className="px-4 py-4 border-b border-analog-border bg-analog-surface space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-medium text-analog-text">New Message</h3>
-            <button
-              onClick={() => setShowNewThread(false)}
-              className="text-analog-text-muted hover:text-analog-text"
-            >
+            <button onClick={() => setShowNewThread(false)} className="text-analog-text-muted hover:text-analog-text">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          <input
-            type="tel"
-            value={newPhone}
-            onChange={(e) => setNewPhone(e.target.value)}
-            placeholder="Phone number (e.g., +1234567890)"
-            className="input w-full"
-          />
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Contact name (optional)"
-            className="input w-full"
-          />
-          <button
-            onClick={handleCreateThread}
-            disabled={!newPhone.trim() || creating}
-            className="btn btn-primary w-full disabled:opacity-50"
-          >
+          <input type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Phone number (e.g., +1234567890)" className="input w-full" />
+          <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Contact name (optional)" className="input w-full" />
+          <button onClick={handleCreateThread} disabled={!newPhone.trim() || creating} className="btn btn-primary w-full disabled:opacity-50">
             {creating ? 'Creating...' : 'Start Conversation'}
           </button>
         </div>
       )}
 
-      {/* Thread List */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="p-6 text-center text-analog-text-muted">Loading messages...</div>
@@ -396,14 +344,9 @@ export default function SmsThreadList({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
-            <p className="text-analog-text-muted mb-2">
-              {searchQuery ? 'No matching conversations' : 'No messages yet'}
-            </p>
+            <p className="text-analog-text-muted mb-2">{searchQuery ? 'No matching conversations' : 'No messages yet'}</p>
             {!searchQuery && (
-              <button
-                onClick={() => setShowNewThread(true)}
-                className="text-sm text-analog-accent hover:underline font-medium"
-              >
+              <button onClick={() => setShowNewThread(true)} className="text-sm text-analog-accent hover:underline font-medium">
                 Start a conversation
               </button>
             )}
@@ -412,7 +355,7 @@ export default function SmsThreadList({
           <div>
             {filteredThreads.map((thread) => {
               const displayName = contactNames.get(thread.id) || thread.contact_name || formatPhone(thread.contact_phone);
-              const isCustomerLinked = contactNames.get(thread.id) !== undefined;
+              const hasName = contactNames.has(thread.id) || !!thread.contact_name;
 
               return (
                 <div
@@ -426,7 +369,6 @@ export default function SmsThreadList({
                 >
                   <div className="px-6 py-4">
                     <div className="flex items-start gap-3">
-                      {/* Star button */}
                       <button
                         onClick={(e) => handleStar(e, thread.id, thread.is_starred)}
                         className={`mt-0.5 flex-shrink-0 transition-all duration-150 ${
@@ -435,18 +377,11 @@ export default function SmsThreadList({
                             : 'text-analog-border-strong hover:text-analog-warning opacity-0 group-hover:opacity-100'
                         }`}
                       >
-                        <svg 
-                          className="w-4 h-4" 
-                          fill={thread.is_starred ? 'currentColor' : 'none'} 
-                          viewBox="0 0 24 24" 
-                          stroke="currentColor" 
-                          strokeWidth={2}
-                        >
+                        <svg className="w-4 h-4" fill={thread.is_starred ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                         </svg>
                       </button>
 
-                      {/* Message icon / avatar */}
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                         !thread.is_read ? 'bg-analog-accent text-white' : 'bg-analog-border text-analog-text-muted'
                       }`}>
@@ -457,29 +392,23 @@ export default function SmsThreadList({
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <h3 className={`text-sm truncate ${
-                            !thread.is_read ? 'font-semibold text-analog-text' : 'text-analog-text'
-                          }`}>
+                          <h3 className={`text-sm truncate ${!thread.is_read ? 'font-semibold text-analog-text' : 'text-analog-text'}`}>
                             {displayName}
                           </h3>
                           <span className="text-xs text-analog-text-faint whitespace-nowrap">
                             {formatTime(thread.last_message_at)}
                           </span>
                         </div>
-                        {/* Show phone number as subtitle when we have a name */}
-                        {(contactNames.get(thread.id) || thread.contact_name) && (
+                        {hasName && (
                           <p className="text-xs text-analog-text-faint truncate">
                             {formatPhone(thread.contact_phone)}
                           </p>
                         )}
-                        <p className={`text-sm truncate mt-1 ${
-                          !thread.is_read ? 'text-analog-text-secondary' : 'text-analog-text-muted'
-                        }`}>
+                        <p className={`text-sm truncate mt-1 ${!thread.is_read ? 'text-analog-text-secondary' : 'text-analog-text-muted'}`}>
                           {thread.last_message_preview || 'No messages yet'}
                         </p>
                       </div>
 
-                      {/* Unread indicator */}
                       {!thread.is_read && (
                         <div className="w-2 h-2 rounded-full bg-analog-accent flex-shrink-0 mt-2" />
                       )}
