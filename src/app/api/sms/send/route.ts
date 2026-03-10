@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     }
 
     // Get the thread
-    const { data: thread, error: threadError } = await supabase
+    const { data: thread, error: threadError } = await serviceSupabase
       .from('sms_threads')
       .select('*, inbox:inboxes(*)')
       .eq('id', threadId)
