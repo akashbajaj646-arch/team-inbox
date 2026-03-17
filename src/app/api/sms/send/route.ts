@@ -47,10 +47,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Get Twilio credentials from inbox
+    // Get Twilio credentials from inbox (include inbox_type for WhatsApp detection)
     const { data: inbox } = await serviceSupabase
       .from('inboxes')
-      .select('twilio_phone_number, twilio_account_sid, twilio_auth_token')
+      .select('twilio_phone_number, twilio_account_sid, twilio_auth_token, inbox_type')
       .eq('id', thread.inbox_id)
       .single();
 
@@ -64,10 +64,11 @@ export async function POST(request: Request) {
     // Initialize Twilio client
     const twilioClient = twilio(inbox.twilio_account_sid, inbox.twilio_auth_token);
 
-    // Send the message
+    // Prefix with whatsapp: if this is a WhatsApp inbox
+    const isWhatsApp = inbox.inbox_type === 'whatsapp';
     const messageOptions: any = {
-      from: inbox.twilio_phone_number,
-      to: thread.contact_phone,
+      from: isWhatsApp ? `whatsapp:${inbox.twilio_phone_number}` : inbox.twilio_phone_number,
+      to: isWhatsApp ? `whatsapp:${thread.contact_phone}` : thread.contact_phone,
     };
 
     if (body) messageOptions.body = body;
@@ -87,28 +88,16 @@ export async function POST(request: Request) {
         body: body || null,
         status: twilioMessage.status,
         sent_at: new Date().toISOString(),
-        sent_by_user_id: user.id,
       })
       .select()
       .single();
 
     if (messageError) {
       console.error('Error saving message:', messageError);
-      return NextResponse.json({ error: 'Failed to save message' }, { status: 500 });
     }
 
-    // Save attachments if any
-    if (mediaUrls && mediaUrls.length > 0 && message) {
-      const attachments = mediaUrls.map((url: string) => ({
-        message_id: message.id,
-        media_url: url,
-        content_type: null,
-      }));
-      await supabase.from('sms_attachments').insert(attachments);
-    }
-
-    // Update thread
-    await supabase
+    // Update thread preview
+    await serviceSupabase
       .from('sms_threads')
       .update({
         last_message_at: new Date().toISOString(),
@@ -120,16 +109,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: {
-        id: message.id,
-        twilio_sid: twilioMessage.sid,
-        status: twilioMessage.status,
-      },
+      messageSid: twilioMessage.sid,
     });
   } catch (err: any) {
     console.error('Send SMS error:', err);
     return NextResponse.json(
-      { error: err.message || 'Failed to send SMS' },
+      { error: err.message || 'Failed to send message' },
       { status: 500 }
     );
   }
