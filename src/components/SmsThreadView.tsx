@@ -6,6 +6,7 @@ import type { SmsThread, SmsMessage, User, Inbox, Contact } from '@/types';
 import CommentSection from './CommentSection';
 import SkuPicker from './SkuPicker';
 import CustomerCard from './CustomerCard';
+import WhatsAppTemplatePicker from './WhatsAppTemplatePicker';
 
 interface Product {
   product_id: string;
@@ -47,10 +48,13 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   const [skuSearchQuery, setSkuSearchQuery] = useState('');
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [contentSid, setContentSid] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
+
+  const isWhatsApp = inbox.inbox_type === 'whatsapp';
 
   useEffect(() => {
     loadThread();
@@ -166,7 +170,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   }
 
   async function handleSend() {
-    if (!newMessage.trim() && !mediaFile || sending) return;
+    if (!newMessage.trim() && !mediaFile && !contentSid || sending) return;
     setSending(true);
 
     let mediaUrls: string[] = [];
@@ -191,13 +195,19 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
     const response = await fetch('/api/sms/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threadId, body: newMessage.trim() || undefined, mediaUrls: mediaUrls.length ? mediaUrls : undefined }),
+      body: JSON.stringify({
+        threadId,
+        body: newMessage.trim() || undefined,
+        mediaUrls: mediaUrls.length ? mediaUrls : undefined,
+        contentSid: contentSid || undefined,
+      }),
     });
 
     if (response.ok) {
       setNewMessage('');
       setMediaFile(null);
       setMediaPreview(null);
+      setContentSid(null);
       loadMessages();
     } else {
       const data = await response.json();
@@ -213,132 +223,123 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ threadId, contact_name: contactName.trim() || null }),
     });
-    setThread(prev => prev ? { ...prev, contact_name: contactName.trim() || null } : null);
+    setThread(prev => prev ? { ...prev, contact_name: contactName.trim() || null } : prev);
     setEditingName(false);
   }
 
-  function formatPhone(phone: string): string {
-    const cleaned = phone.replace(/\D/g, '');
-    if (cleaned.length === 11 && cleaned.startsWith('1')) {
-      return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
-    }
-    if (cleaned.length === 10) {
-      return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-    }
-    return phone;
+  function formatTime(dateString: string) {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  function formatTime(dateStr: string): string {
-    return new Date(dateStr).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
+  function formatDate(dateString: string) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'long' });
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  function formatDate(dateStr: string): string {
-    const date = new Date(dateStr);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (date.toDateString() === today.toDateString()) return 'Today';
-    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  }
-
-  function groupMessagesByDate(msgs: SmsMessageWithUser[]): Record<string, SmsMessageWithUser[]> {
+  function groupMessagesByDate(messages: SmsMessageWithUser[]) {
     const groups: Record<string, SmsMessageWithUser[]> = {};
-    msgs.forEach(msg => {
-      const dateKey = new Date(msg.sent_at).toDateString();
-      if (!groups[dateKey]) groups[dateKey] = [];
-      groups[dateKey].push(msg);
+    messages.forEach(message => {
+      const date = new Date(message.sent_at).toDateString();
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(message);
     });
     return groups;
   }
 
-  function getInitials(name: string | null | undefined, email: string): string {
-    if (name) {
-      const parts = name.trim().split(' ');
-      if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-      return parts[0][0].toUpperCase();
-    }
-    return email.charAt(0).toUpperCase();
-  }
-
-  const BUBBLE_COLORS = [
-    'bg-violet-500', 'bg-blue-500', 'bg-emerald-500',
-    'bg-orange-500', 'bg-pink-500', 'bg-teal-500',
-  ];
-
   function getBubbleColor(userId: string): string {
+    const colors = [
+      'bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500',
+      'bg-pink-500', 'bg-teal-500', 'bg-indigo-500', 'bg-red-500',
+    ];
     let hash = 0;
     for (let i = 0; i < userId.length; i++) {
       hash = userId.charCodeAt(i) + ((hash << 5) - hash);
     }
-    return BUBBLE_COLORS[Math.abs(hash) % BUBBLE_COLORS.length];
+    return colors[Math.abs(hash) % colors.length];
   }
 
-  if (!thread) {
+  function getInitials(name: string | null | undefined, email: string): string {
+    if (name) {
+      const parts = name.split(' ');
+      if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+      return name[0].toUpperCase();
+    }
+    return email[0].toUpperCase();
+  }
+
+  const groupedMessages = groupMessagesByDate(messages);
+  const displayName = customerLinkedName || contactDisplayName || thread?.contact_name || thread?.contact_phone || 'Unknown';
+
+  if (!thread && !loading) {
     return (
-      <div className="flex-1 flex items-center justify-center text-analog-text-muted">
-        Loading...
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-analog-text-muted">Thread not found</p>
       </div>
     );
   }
 
-  const groupedMessages = groupMessagesByDate(messages);
-
-  // Priority: customer link > contact display name > thread contact name > phone
-  const headerName = customerLinkedName || contactDisplayName || thread.contact_name || formatPhone(thread.contact_phone);
-  const headerSubtitle = (customerLinkedName || contactDisplayName || thread.contact_name)
-    ? formatPhone(thread.contact_phone)
-    : 'SMS Conversation';
-
   return (
-    <div className="flex-1 flex flex-row h-screen bg-analog-surface overflow-hidden">
-
+    <div className="flex flex-1 min-w-0 h-full overflow-hidden">
       {/* Main SMS column */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
 
         {/* Header */}
-        <div className="px-6 py-4 border-b-2 border-analog-border-strong bg-analog-surface flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-analog-accent/10 flex items-center justify-center">
-              <svg className="w-6 h-6 text-analog-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
+        <div className="flex-shrink-0 border-b-2 border-analog-border-strong bg-analog-surface px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-analog-accent to-analog-accent-light flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                {displayName.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                {editingName ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={contactName}
+                      onChange={(e) => setContactName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleUpdateName();
+                        if (e.key === 'Escape') setEditingName(false);
+                      }}
+                      className="input text-sm py-1"
+                      autoFocus
+                    />
+                    <button onClick={handleUpdateName} className="btn btn-primary text-xs px-2 py-1">Save</button>
+                    <button onClick={() => setEditingName(false)} className="text-analog-text-muted text-xs hover:text-analog-text">Cancel</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-display font-semibold text-analog-text truncate">{displayName}</h2>
+                    <button
+                      onClick={() => setEditingName(true)}
+                      className="text-analog-text-faint hover:text-analog-text transition-colors flex-shrink-0"
+                      title="Edit contact name"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+                <p className="text-sm text-analog-text-muted">{thread?.contact_phone}</p>
+              </div>
             </div>
-            <div>
-              {editingName ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
-                    className="input py-1 px-2 text-sm w-48"
-                    placeholder="Contact name"
-                    autoFocus
-                  />
-                  <button onClick={handleUpdateName} className="text-analog-accent text-sm font-medium">Save</button>
-                  <button onClick={() => setEditingName(false)} className="text-analog-text-muted text-sm">Cancel</button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <h2 className="font-display text-lg font-medium text-analog-text">
-                    {headerName}
-                  </h2>
-                  <button
-                    onClick={() => setEditingName(true)}
-                    className="text-analog-text-faint hover:text-analog-accent"
-                    title="Edit contact name"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
-                </div>
+
+            <div className="flex items-center gap-2">
+              {isWhatsApp && (
+                <span className="flex items-center gap-1.5 text-xs text-green-600 bg-green-50 border border-green-200 px-2 py-1 rounded-full">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .057 5.335.057 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                  </svg>
+                  WhatsApp
+                </span>
               )}
-              <p className="text-sm text-analog-text-faint">{headerSubtitle}</p>
             </div>
           </div>
         </div>
@@ -451,6 +452,18 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                 >×</button>
               </div>
             )}
+
+            {/* Template selected indicator */}
+            {contentSid && (
+              <div className="mb-2 flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .057 5.335.057 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                </svg>
+                Template selected — message will send as WhatsApp template
+                <button onClick={() => setContentSid(null)} className="ml-auto text-green-600 hover:text-green-800">✕</button>
+              </div>
+            )}
+
             <div className="flex items-end gap-3">
               <input
                 ref={fileInputRef}
@@ -475,6 +488,17 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                 </svg>
               </button>
+
+              {isWhatsApp && (
+                <WhatsAppTemplatePicker
+                  inboxId={inbox.id}
+                  onSelect={(body, sid) => {
+                    setNewMessage(body);
+                    setContentSid(sid);
+                  }}
+                />
+              )}
+
               <div className="flex-1 relative">
                 <textarea
                   ref={textareaRef}
@@ -490,7 +514,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                     }
                     if (e.key === 'Escape' && showSkuPicker) setShowSkuPicker(false);
                   }}
-                  placeholder="Type a message... (use /sku: to search products)"
+                  placeholder={isWhatsApp ? 'Reply (or use a template for new conversations)...' : 'Type a message... (use /sku: to search products)'}
                   rows={1}
                   className="input w-full resize-none"
                   style={{ minHeight: '44px', maxHeight: '120px' }}
@@ -506,7 +530,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
               </div>
               <button
                 onClick={handleSend}
-                disabled={(!newMessage.trim() && !mediaFile) || sending}
+                disabled={(!newMessage.trim() && !mediaFile && !contentSid) || sending}
                 className="btn btn-primary disabled:opacity-50"
               >
                 {sending ? (
@@ -522,7 +546,9 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
               </button>
             </div>
             <p className="text-xs text-analog-text-faint mt-2">
-              Press Enter to send, Shift+Enter for new line • Type /sku: to insert product link
+              {isWhatsApp
+                ? 'Press Enter to send • Use template button for new conversations outside 24hr window'
+                : 'Press Enter to send, Shift+Enter for new line • Type /sku: to insert product link'}
             </p>
           </div>
         </div>
@@ -531,7 +557,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
 
       {/* Right sidebar */}
       <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
-        <CustomerCard phone={thread.contact_phone} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
+        <CustomerCard phone={thread?.contact_phone || ''} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
       </div>
 
     </div>

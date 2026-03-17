@@ -6,11 +6,11 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    const { threadId, body, mediaUrls } = await request.json();
+    const { threadId, body, mediaUrls, contentSid } = await request.json();
 
-    if (!threadId || (!body && (!mediaUrls || mediaUrls.length === 0))) {
+    if (!threadId || (!body && !contentSid && (!mediaUrls || mediaUrls.length === 0))) {
       return NextResponse.json(
-        { error: 'Thread ID and message body or media required' },
+        { error: 'Thread ID and message body, contentSid, or media required' },
         { status: 400 }
       );
     }
@@ -71,8 +71,14 @@ export async function POST(request: Request) {
       to: isWhatsApp ? `whatsapp:${thread.contact_phone}` : thread.contact_phone,
     };
 
-    if (body) messageOptions.body = body;
-    if (mediaUrls && mediaUrls.length > 0) messageOptions.mediaUrl = mediaUrls;
+    if (contentSid) {
+      // Send as a WhatsApp template using contentSid
+      messageOptions.contentSid = contentSid;
+    } else {
+      // Send as a freeform message
+      if (body) messageOptions.body = body;
+      if (mediaUrls && mediaUrls.length > 0) messageOptions.mediaUrl = mediaUrls;
+    }
 
     const twilioMessage = await twilioClient.messages.create(messageOptions);
 
@@ -85,7 +91,7 @@ export async function POST(request: Request) {
         direction: 'outbound',
         from_number: inbox.twilio_phone_number,
         to_number: thread.contact_phone,
-        body: body || null,
+        body: body || (contentSid ? '[Template Message]' : null),
         status: twilioMessage.status,
         sent_at: new Date().toISOString(),
       })
@@ -96,12 +102,22 @@ export async function POST(request: Request) {
       console.error('Error saving message:', messageError);
     }
 
+    // Save attachments if any
+    if (mediaUrls && mediaUrls.length > 0 && message) {
+      const attachments = mediaUrls.map((url: string) => ({
+        message_id: message.id,
+        media_url: url,
+        content_type: null,
+      }));
+      await supabase.from('sms_attachments').insert(attachments);
+    }
+
     // Update thread preview
     await serviceSupabase
       .from('sms_threads')
       .update({
         last_message_at: new Date().toISOString(),
-        last_message_preview: body?.substring(0, 100) || '[Media]',
+        last_message_preview: body?.substring(0, 100) || '[Template Message]',
         is_read: true,
         updated_at: new Date().toISOString(),
       })
