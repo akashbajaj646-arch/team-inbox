@@ -26,7 +26,10 @@ export default function SmsThreadList({
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [contactNames, setContactNames] = useState<Map<string, string>>(new Map());
+  const [copyToast, setCopyToast] = useState(false);
   const supabase = createClient();
+
+  const isWhatsApp = inbox.inbox_type === 'whatsapp';
 
   useEffect(() => {
     loadThreads();
@@ -54,15 +57,15 @@ export default function SmsThreadList({
 
   async function loadThreads() {
     setLoading(true);
-    
+
     const response = await fetch(`/api/sms/threads?inboxId=${inbox.id}`);
     const data = await response.json();
-    
+
     if (data.threads) {
       setThreads(data.threads);
       loadContactNames(data.threads);
     }
-    
+
     setLoading(false);
   }
 
@@ -71,17 +74,14 @@ export default function SmsThreadList({
 
     const newContactNames = new Map<string, string>();
 
-    // Collect all unique phones (digits only)
     const phones = threadsList.map(t => t.contact_phone).filter(Boolean);
     const uniquePhones = [...new Set(phones.map(p => p.replace(/\D/g, '')))];
 
-    // Single bulk query for all customer links
     const { data: links } = await supabase
       .from('thread_customer_links')
       .select('phone, customer:customers(customer_name)')
       .not('phone', 'is', null);
 
-    // Build a map of digits-only phone -> customer name
     const customerNameByPhone = new Map<string, string>();
     if (links) {
       for (const link of links) {
@@ -95,7 +95,6 @@ export default function SmsThreadList({
       }
     }
 
-    // Single bulk query for all contacts by phone
     const contactNameByPhone = new Map<string, string>();
     if (uniquePhones.length > 0) {
       const { data: contacts } = await supabase
@@ -120,10 +119,8 @@ export default function SmsThreadList({
       }
     }
 
-    // Now resolve each thread name in priority order
     for (const thread of threadsList) {
       const cleanPhone = thread.contact_phone.replace(/\D/g, '');
-
       if (customerNameByPhone.has(cleanPhone)) {
         newContactNames.set(thread.id, customerNameByPhone.get(cleanPhone)!);
       } else if (thread.contact_name) {
@@ -139,7 +136,7 @@ export default function SmsThreadList({
   async function handleCreateThread() {
     if (!newPhone.trim()) return;
     setCreating(true);
-    
+
     const response = await fetch('/api/sms/threads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -149,9 +146,9 @@ export default function SmsThreadList({
         contactName: newName.trim() || null,
       }),
     });
-    
+
     const data = await response.json();
-    
+
     if (data.thread) {
       onSelectThread(data.thread.id);
       setShowNewThread(false);
@@ -159,19 +156,19 @@ export default function SmsThreadList({
       setNewName('');
       loadThreads();
     }
-    
+
     setCreating(false);
   }
 
   async function handleStar(e: React.MouseEvent, threadId: string, isStarred: boolean) {
     e.stopPropagation();
-    
+
     await fetch('/api/sms/threads', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ threadId, is_starred: !isStarred }),
     });
-    
+
     setThreads(prev =>
       prev.map(t => t.id === threadId ? { ...t, is_starred: !isStarred } : t)
     );
@@ -202,6 +199,15 @@ export default function SmsThreadList({
 
     setSyncing(false);
     setTimeout(() => setSyncStatus(null), 5000);
+  }
+
+  function handleCopyInviteLink() {
+    if (!inbox.twilio_phone_number) return;
+    const digits = inbox.twilio_phone_number.replace(/\D/g, '');
+    const link = `https://wa.me/${digits}`;
+    navigator.clipboard.writeText(link);
+    setCopyToast(true);
+    setTimeout(() => setCopyToast(false), 2500);
   }
 
   function formatPhone(phone: string): string {
@@ -276,6 +282,27 @@ export default function SmsThreadList({
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </button>
+
+          {/* WhatsApp invite link button — only for WhatsApp inboxes */}
+          {isWhatsApp && inbox.twilio_phone_number && (
+            <div className="relative">
+              <button
+                onClick={handleCopyInviteLink}
+                className="p-2 text-analog-text-muted hover:bg-analog-hover hover:text-analog-accent rounded-lg transition-all duration-150"
+                title="Copy WhatsApp invite link"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+              </button>
+              {copyToast && (
+                <div className="absolute right-0 top-10 bg-analog-text text-white text-xs px-3 py-1.5 rounded-lg whitespace-nowrap z-50 shadow-lg">
+                  Link copied!
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             onClick={() => setShowNewThread(true)}
             className="p-2 text-analog-text-muted hover:bg-analog-hover hover:text-analog-accent rounded-lg transition-all duration-150"
