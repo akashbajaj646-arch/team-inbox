@@ -388,6 +388,18 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                                 <div key={attachment.id}>
                                   {attachment.content_type?.startsWith('image/') ? (
                                     <img src={`/api/sms/media?url=${encodeURIComponent(attachment.media_url)}&inboxId=${inbox.id}`} alt="MMS attachment" className="max-w-full rounded-lg" />
+                                  ) : attachment.content_type?.startsWith('audio/') ? (
+                                    <div className={`flex items-center gap-2 px-1 py-1 rounded-lg ${message.direction === 'outbound' ? 'bg-white/10' : 'bg-analog-border/30'}`}>
+                                      <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M12 3a9 9 0 100 18A9 9 0 0012 3zm-1 13V8l6 4-6 4z" />
+                                      </svg>
+                                      <audio
+                                        controls
+                                        src={`/api/sms/media?url=${encodeURIComponent(attachment.media_url)}&inboxId=${inbox.id}`}
+                                        className="h-8 w-48"
+                                        style={{ filter: message.direction === 'outbound' ? 'invert(1)' : 'none' }}
+                                      />
+                                    </div>
                                   ) : (
                                     <a href={attachment.media_url} target="_blank" rel="noopener noreferrer" className="text-sm underline">
                                       View attachment
