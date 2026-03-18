@@ -68,8 +68,8 @@ export async function GET(request: Request) {
     // Filter to only WhatsApp-approved templates and shape the response
     const templates = (data.contents || [])
       .filter((t: any) => {
-        // Include templates that have WhatsApp approval
-        const approvals = t.approvalRequests?.whatsapp;
+        // Twilio returns snake_case: approval_requests
+        const approvals = t.approval_requests?.whatsapp;
         return approvals && approvals.status === 'approved';
       })
       .map((t: any) => {
@@ -94,7 +94,7 @@ export async function GET(request: Request) {
           variableCount,
           variables: t.variables || {},
           language: t.language,
-          status: t.approvalRequests?.whatsapp?.status,
+          status: t.approval_requests?.whatsapp?.status,
         };
       });
 
