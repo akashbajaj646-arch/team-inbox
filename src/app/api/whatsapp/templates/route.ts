@@ -3,6 +3,13 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * GET /api/whatsapp/templates?inboxId=xxx
+ * Fetches WhatsApp templates from Twilio's Content API.
+ * Note: Twilio's Content API does not include approval status in the
+ * main response — approvals are on a separate endpoint. We return all
+ * templates for the account since the Content API only returns your own.
+ */
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -43,9 +50,7 @@ export async function GET(request: Request) {
 
     const auth = Buffer.from(`${inbox.twilio_account_sid}:${inbox.twilio_auth_token}`).toString('base64');
     const apiResponse = await fetch('https://content.twilio.com/v1/Content', {
-      headers: {
-        Authorization: `Basic ${auth}`,
-      },
+      headers: { Authorization: `Basic ${auth}` },
     });
 
     if (!apiResponse.ok) {
@@ -55,9 +60,6 @@ export async function GET(request: Request) {
     }
 
     const data = await apiResponse.json();
-
-    // DEBUG MODE: return all templates without filtering + full raw object
-    // so we can inspect the actual approval field structure from Twilio
     const raw = data.contents || [];
 
     const templates = raw.map((t: any) => {
@@ -80,13 +82,10 @@ export async function GET(request: Request) {
         variableCount,
         variables: t.variables || {},
         language: t.language,
-        approvalRequests: t.approvalRequests,
-        approval_requests: t.approval_requests,
-        _raw: t,
       };
     });
 
-    return NextResponse.json({ templates, _debug: true, totalCount: raw.length });
+    return NextResponse.json({ templates });
   } catch (err: any) {
     console.error('Templates fetch error:', err);
     return NextResponse.json({ error: err.message || 'Failed to fetch templates' }, { status: 500 });
