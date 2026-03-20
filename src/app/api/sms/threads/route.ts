@@ -6,6 +6,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const inboxId = searchParams.get('inboxId');
+    const view = searchParams.get('view') || 'all'; // all | unread | starred | trash
 
     if (!inboxId) {
       return NextResponse.json({ error: 'Missing inboxId' }, { status: 400 });
@@ -13,7 +14,6 @@ export async function GET(request: Request) {
 
     const supabase = await createClient();
 
-    // Verify user has access
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -30,13 +30,28 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Get threads
-    const { data: threads, error } = await supabase
+    let query = supabase
       .from('sms_threads')
       .select('*')
       .eq('inbox_id', inboxId)
-      .is('deleted_at', null)
       .order('last_message_at', { ascending: false });
+
+    switch (view) {
+      case 'trash':
+        query = query.not('deleted_at', 'is', null);
+        break;
+      case 'unread':
+        query = query.is('deleted_at', null).eq('is_read', false);
+        break;
+      case 'starred':
+        query = query.is('deleted_at', null).eq('is_starred', true);
+        break;
+      default: // 'all'
+        query = query.is('deleted_at', null);
+        break;
+    }
+
+    const { data: threads, error } = await query;
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -63,7 +78,6 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
 
-    // Verify user has access
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -122,7 +136,7 @@ export async function POST(request: Request) {
   }
 }
 
-// PATCH: Update thread (mark read, star, update contact name, etc.)
+// PATCH: Update thread (mark read, star, soft-delete, restore, update contact name, etc.)
 export async function PATCH(request: Request) {
   try {
     const { threadId, ...updates } = await request.json();
@@ -133,13 +147,11 @@ export async function PATCH(request: Request) {
 
     const supabase = await createClient();
 
-    // Verify user has access
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get thread to verify access
     const { data: thread } = await supabase
       .from('sms_threads')
       .select('inbox_id')
@@ -161,10 +173,9 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Allowed updates
     const allowedFields = ['is_read', 'is_starred', 'is_archived', 'contact_name', 'deleted_at'];
     const sanitizedUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
-    
+
     for (const [key, value] of Object.entries(updates)) {
       if (allowedFields.includes(key)) {
         sanitizedUpdates[key] = value;
@@ -186,5 +197,60 @@ export async function PATCH(request: Request) {
   } catch (err) {
     console.error('Error updating SMS thread:', err);
     return NextResponse.json({ error: 'Failed to update thread' }, { status: 500 });
+  }
+}
+
+// DELETE: Permanently delete a thread and all its messages
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const threadId = searchParams.get('threadId');
+
+    if (!threadId) {
+      return NextResponse.json({ error: 'Missing threadId' }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { data: thread } = await supabase
+      .from('sms_threads')
+      .select('inbox_id')
+      .eq('id', threadId)
+      .single();
+
+    if (!thread) {
+      return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
+    }
+
+    const { data: membership } = await supabase
+      .from('inbox_members')
+      .select('*')
+      .eq('inbox_id', thread.inbox_id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (!membership) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    // CASCADE will handle sms_messages and sms_attachments automatically
+    const { error } = await supabase
+      .from('sms_threads')
+      .delete()
+      .eq('id', threadId);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting SMS thread:', err);
+    return NextResponse.json({ error: 'Failed to delete thread' }, { status: 500 });
   }
 }

@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { SmsThread, Inbox, Contact } from '@/types';
+import type { SmsThread, Inbox } from '@/types';
+
+type SmsView = 'all' | 'unread' | 'starred' | 'trash';
 
 interface SmsThreadListProps {
   inbox: Inbox;
@@ -17,6 +19,7 @@ export default function SmsThreadList({
 }: SmsThreadListProps) {
   const [threads, setThreads] = useState<SmsThread[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<SmsView>('all');
   const [showNewThread, setShowNewThread] = useState(false);
   const [newPhone, setNewPhone] = useState('');
   const [newName, setNewName] = useState('');
@@ -26,10 +29,7 @@ export default function SmsThreadList({
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [contactNames, setContactNames] = useState<Map<string, string>>(new Map());
-  const [copyToast, setCopyToast] = useState(false);
   const supabase = createClient();
-
-  const isWhatsApp = inbox.inbox_type === 'whatsapp';
 
   useEffect(() => {
     loadThreads();
@@ -53,12 +53,12 @@ export default function SmsThreadList({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [inbox.id]);
+  }, [inbox.id, activeView]);
 
   async function loadThreads() {
     setLoading(true);
 
-    const response = await fetch(`/api/sms/threads?inboxId=${inbox.id}`);
+    const response = await fetch(`/api/sms/threads?inboxId=${inbox.id}&view=${activeView}`);
     const data = await response.json();
 
     if (data.threads) {
@@ -174,6 +174,48 @@ export default function SmsThreadList({
     );
   }
 
+  async function handleDelete(e: React.MouseEvent, threadId: string) {
+    e.stopPropagation();
+
+    await fetch('/api/sms/threads', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId, deleted_at: new Date().toISOString() }),
+    });
+
+    setThreads(prev => prev.filter(t => t.id !== threadId));
+
+    if (selectedThreadId === threadId) {
+      onSelectThread('');
+    }
+  }
+
+  async function handleRestore(e: React.MouseEvent, threadId: string) {
+    e.stopPropagation();
+
+    await fetch('/api/sms/threads', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId, deleted_at: null }),
+    });
+
+    setThreads(prev => prev.filter(t => t.id !== threadId));
+  }
+
+  async function handlePermanentDelete(e: React.MouseEvent, threadId: string) {
+    e.stopPropagation();
+
+    if (!confirm('Permanently delete this conversation? This cannot be undone.')) return;
+
+    await fetch(`/api/sms/threads?threadId=${threadId}`, { method: 'DELETE' });
+
+    setThreads(prev => prev.filter(t => t.id !== threadId));
+
+    if (selectedThreadId === threadId) {
+      onSelectThread('');
+    }
+  }
+
   async function handleSync() {
     setSyncing(true);
     setSyncStatus('Syncing messages from Twilio...');
@@ -199,15 +241,6 @@ export default function SmsThreadList({
 
     setSyncing(false);
     setTimeout(() => setSyncStatus(null), 5000);
-  }
-
-  function handleCopyInviteLink() {
-    if (!inbox.twilio_phone_number) return;
-    const digits = inbox.twilio_phone_number.replace(/\D/g, '');
-    const link = `https://wa.me/${digits}`;
-    navigator.clipboard.writeText(link);
-    setCopyToast(true);
-    setTimeout(() => setCopyToast(false), 2500);
   }
 
   function formatPhone(phone: string): string {
@@ -244,6 +277,13 @@ export default function SmsThreadList({
         contactNames.get(t.id)?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : threads;
+
+  const views: { key: SmsView; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'unread', label: 'Unread' },
+    { key: 'starred', label: 'Starred' },
+    { key: 'trash', label: 'Trash' },
+  ];
 
   return (
     <div className="w-[360px] border-r-2 border-analog-border-strong flex flex-col h-screen bg-analog-surface-alt">
@@ -282,27 +322,6 @@ export default function SmsThreadList({
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </button>
-
-          {/* WhatsApp invite link button — only for WhatsApp inboxes */}
-          {isWhatsApp && inbox.twilio_phone_number && (
-            <div className="relative">
-              <button
-                onClick={handleCopyInviteLink}
-                className="p-2 text-analog-text-muted hover:bg-analog-hover hover:text-analog-accent rounded-lg transition-all duration-150"
-                title="Copy WhatsApp invite link"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
-              </button>
-              {copyToast && (
-                <div className="absolute right-0 top-10 bg-analog-text text-white text-xs px-3 py-1.5 rounded-lg whitespace-nowrap z-50 shadow-lg">
-                  Link copied!
-                </div>
-              )}
-            </div>
-          )}
-
           <button
             onClick={() => setShowNewThread(true)}
             className="p-2 text-analog-text-muted hover:bg-analog-hover hover:text-analog-accent rounded-lg transition-all duration-150"
@@ -313,6 +332,23 @@ export default function SmsThreadList({
             </svg>
           </button>
         </div>
+      </div>
+
+      {/* View tabs */}
+      <div className="flex border-b border-analog-border bg-analog-surface px-2">
+        {views.map((view) => (
+          <button
+            key={view.key}
+            onClick={() => setActiveView(view.key)}
+            className={`px-3 py-2.5 text-xs font-medium transition-all duration-150 border-b-2 -mb-px ${
+              activeView === view.key
+                ? 'border-analog-accent text-analog-accent'
+                : 'border-transparent text-analog-text-muted hover:text-analog-text'
+            }`}
+          >
+            {view.label}
+          </button>
+        ))}
       </div>
 
       {syncStatus && (
@@ -368,11 +404,25 @@ export default function SmsThreadList({
           <div className="p-6 text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-analog-surface flex items-center justify-center">
               <svg className="w-8 h-8 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                {activeView === 'trash'
+                  ? <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  : <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                }
               </svg>
             </div>
-            <p className="text-analog-text-muted mb-2">{searchQuery ? 'No matching conversations' : 'No messages yet'}</p>
-            {!searchQuery && (
+            <p className="text-analog-text-muted mb-2">
+              {searchQuery
+                ? 'No matching conversations'
+                : activeView === 'trash'
+                  ? 'Trash is empty'
+                  : activeView === 'unread'
+                    ? 'No unread conversations'
+                    : activeView === 'starred'
+                      ? 'No starred conversations'
+                      : 'No messages yet'
+              }
+            </p>
+            {!searchQuery && activeView === 'all' && (
               <button onClick={() => setShowNewThread(true)} className="text-sm text-analog-accent hover:underline font-medium">
                 Start a conversation
               </button>
@@ -387,8 +437,10 @@ export default function SmsThreadList({
               return (
                 <div
                   key={thread.id}
-                  onClick={() => onSelectThread(thread.id)}
-                  className={`relative group cursor-pointer transition-all duration-150 ${
+                  onClick={() => activeView !== 'trash' ? onSelectThread(thread.id) : undefined}
+                  className={`relative group transition-all duration-150 ${
+                    activeView !== 'trash' ? 'cursor-pointer' : 'cursor-default'
+                  } ${
                     selectedThreadId === thread.id
                       ? 'bg-analog-surface border-l-4 border-l-analog-accent border-y border-y-analog-border-strong'
                       : 'border-b border-analog-border hover:bg-analog-surface'
@@ -396,21 +448,26 @@ export default function SmsThreadList({
                 >
                   <div className="px-6 py-4">
                     <div className="flex items-start gap-3">
-                      <button
-                        onClick={(e) => handleStar(e, thread.id, thread.is_starred)}
-                        className={`mt-0.5 flex-shrink-0 transition-all duration-150 ${
-                          thread.is_starred
-                            ? 'text-analog-warning'
-                            : 'text-analog-border-strong hover:text-analog-warning opacity-0 group-hover:opacity-100'
-                        }`}
-                      >
-                        <svg className="w-4 h-4" fill={thread.is_starred ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                        </svg>
-                      </button>
+                      {/* Star button — hidden in trash */}
+                      {activeView !== 'trash' && (
+                        <button
+                          onClick={(e) => handleStar(e, thread.id, thread.is_starred)}
+                          className={`mt-0.5 flex-shrink-0 transition-all duration-150 ${
+                            thread.is_starred
+                              ? 'text-analog-warning'
+                              : 'text-analog-border-strong hover:text-analog-warning opacity-0 group-hover:opacity-100'
+                          }`}
+                        >
+                          <svg className="w-4 h-4" fill={thread.is_starred ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                          </svg>
+                        </button>
+                      )}
 
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        !thread.is_read ? 'bg-analog-accent text-white' : 'bg-analog-border text-analog-text-muted'
+                        !thread.is_read
+                          ? 'bg-analog-accent text-white'
+                          : 'bg-analog-border text-analog-text-muted'
                       }`}>
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -436,7 +493,43 @@ export default function SmsThreadList({
                         </p>
                       </div>
 
-                      {!thread.is_read && (
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        {activeView === 'trash' ? (
+                          <>
+                            <button
+                              onClick={(e) => handleRestore(e, thread.id)}
+                              className="p-1.5 text-analog-text-muted hover:text-analog-success hover:bg-analog-success/10 rounded transition-all duration-150"
+                              title="Restore conversation"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={(e) => handlePermanentDelete(e, thread.id)}
+                              className="p-1.5 text-analog-text-muted hover:text-analog-error hover:bg-analog-error/10 rounded transition-all duration-150"
+                              title="Delete permanently"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={(e) => handleDelete(e, thread.id)}
+                            className="p-1.5 text-analog-text-muted hover:text-analog-error hover:bg-analog-error/10 rounded transition-all duration-150"
+                            title="Move to trash"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+
+                      {!thread.is_read && activeView !== 'trash' && (
                         <div className="w-2 h-2 rounded-full bg-analog-accent flex-shrink-0 mt-2" />
                       )}
                     </div>
