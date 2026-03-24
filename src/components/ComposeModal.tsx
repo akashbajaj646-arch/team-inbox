@@ -49,7 +49,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           setSending(false);
           return;
         }
-        const res = await fetch('/api/emails/send', {
+        const res = await fetch('/api/emails/send-new', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
