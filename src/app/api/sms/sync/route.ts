@@ -46,7 +46,8 @@ export async function POST(request: Request) {
     const lookbackDate = new Date();
     lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
 
-    const [inboundMessages, outboundMessages] = await Promise.all([
+    const whatsappNumber = `whatsapp:${inbox.twilio_phone_number}`;
+    const [inboundMessages, outboundMessages, waInbound, waOutbound] = await Promise.all([
       twilioClient.messages.list({
         to: inbox.twilio_phone_number,
         dateSentAfter: lookbackDate,
@@ -57,9 +58,19 @@ export async function POST(request: Request) {
         dateSentAfter: lookbackDate,
         limit: 10000,
       }),
+      twilioClient.messages.list({
+        to: whatsappNumber,
+        dateSentAfter: lookbackDate,
+        limit: 10000,
+      }).catch(() => []),
+      twilioClient.messages.list({
+        from: whatsappNumber,
+        dateSentAfter: lookbackDate,
+        limit: 10000,
+      }).catch(() => []),
     ]);
 
-    const allMessages = [...inboundMessages, ...outboundMessages];
+    const allMessages = [...inboundMessages, ...outboundMessages, ...waInbound, ...waOutbound];
     allMessages.sort((a, b) =>
       new Date(a.dateSent || a.dateCreated).getTime() -
       new Date(b.dateSent || b.dateCreated).getTime()
@@ -73,8 +84,8 @@ export async function POST(request: Request) {
       if (processedSids.has(msg.sid)) continue;
       processedSids.add(msg.sid);
 
-      const isInbound = msg.to === inbox.twilio_phone_number;
-      const contactPhone = isInbound ? msg.from : msg.to;
+      const isInbound = msg.to === inbox.twilio_phone_number || msg.to === `whatsapp:${inbox.twilio_phone_number}`;
+      const contactPhone = (isInbound ? msg.from : msg.to).replace('whatsapp:', '');
       const direction = isInbound ? 'inbound' : 'outbound';
 
       const { data: existingMessage } = await serviceSupabase
