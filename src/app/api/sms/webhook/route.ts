@@ -50,12 +50,14 @@ export async function POST(request: Request) {
     }
 
     // Find or create thread for this contact
-    let { data: thread } = await supabase
+    const { data: threads } = await supabase
       .from('sms_threads')
       .select('*')
       .eq('inbox_id', inbox.id)
       .eq('contact_phone', from)
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(1);
+    let thread = threads?.[0] || null;
 
     if (!thread) {
       const { data: newThread, error: threadError } = await supabase
