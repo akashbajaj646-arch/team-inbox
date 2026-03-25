@@ -45,6 +45,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [bccField, setBccField] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
 
@@ -290,6 +291,57 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     if (!showComposer) setShowComposer(true);
   }
 
+  async function handleMarkUnread() {
+    await supabase.from('email_threads').update({ is_read: false }).eq('id', threadId);
+    setOpenMenuId(null);
+  }
+
+  async function handleDelete() {
+    if (!confirm('Delete this thread? This cannot be undone.')) return;
+    await supabase.from('email_threads').update({ deleted_at: new Date().toISOString() }).eq('id', threadId);
+    setOpenMenuId(null);
+  }
+
+  function handlePrint() {
+    window.print();
+    setOpenMenuId(null);
+  }
+
+  function handleForward(message: EmailMessageWithUser) {
+    const fwdBody = `<br/><br/>---------- Forwarded message ----------<br/>${message.body_html || message.body_text || ''}`;
+    setReplyBody(fwdBody);
+    setOpenMenuId(null);
+  }
+
+  async function handleResend(message: EmailMessageWithUser) {
+    const response = await fetch('/api/emails/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId, body: message.body_html || message.body_text || '' }),
+    });
+    if (response.ok) {
+      await loadMessages();
+    }
+    setOpenMenuId(null);
+  }
+
+  async function handleResendAsNew(message: EmailMessageWithUser) {
+    const response = await fetch('/api/emails/send-new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        inboxId: thread?.inbox_id,
+        to: message.to_addresses?.[0] || '',
+        subject: thread?.subject || '',
+        body: message.body_html || message.body_text || '',
+      }),
+    });
+    if (response.ok) {
+      alert('Sent as new conversation.');
+    }
+    setOpenMenuId(null);
+  }
+
   function formatDate(dateString: string) {
     const date = new Date(dateString);
     return date.toLocaleDateString([], {
@@ -450,6 +502,48 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   <span className="text-xs text-analog-text-placeholder">
                     {formatDate(message.sent_at)}
                   </span>
+
+                  {/* Actions Menu */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setOpenMenuId(openMenuId === message.id ? null : message.id)}
+                      className="p-1.5 rounded-lg text-analog-text-muted hover:text-analog-text hover:bg-analog-hover transition-all"
+                      title="More actions"
+                    >
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                        <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                      </svg>
+                    </button>
+                    {openMenuId === message.id && (
+                      <div className="absolute right-0 top-8 z-50 w-56 bg-white border border-analog-border rounded-xl shadow-lg overflow-hidden">
+                        <button onClick={() => handleForward(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                          Forward
+                        </button>
+                        <button onClick={() => handleResend(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                          Resend
+                        </button>
+                        <button onClick={() => handleResendAsNew(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+                          Resend as New Conversation
+                        </button>
+                        <div className="border-t border-analog-border my-1"/>
+                        <button onClick={handleMarkUnread} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                          Mark as Unread
+                        </button>
+                        <button onClick={handleDelete} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                          Delete
+                        </button>
+                        <button onClick={handlePrint} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+                          Print
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Message Body */}
