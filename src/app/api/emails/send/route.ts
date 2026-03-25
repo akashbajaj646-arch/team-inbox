@@ -92,8 +92,10 @@ export async function POST(request: Request) {
     const headers = parseHeaders(lastMessage.payload.headers);
 
     // Determine who to reply to
-    const replyTo = headers['reply-to'] || headers.from;
-    const { address: toAddress } = parseEmailAddress(replyTo);
+    const replyToRaw = headers['reply-to'] || headers.from || '';
+    // Extract email address robustly - handle "Name <email>" and plain "email" formats
+    const angleMatch = replyToRaw.match(/<([^>]+)>/);
+    const toAddress = angleMatch ? angleMatch[1].trim() : replyToRaw.trim();
 
     // Build subject (add Re: if not already present)
     let subject = thread.subject;
