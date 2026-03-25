@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     }
 
     // Get thread with inbox info
-    const { data: thread, error: threadError } = await supabase
+    const { data: thread, error: threadError } = await serviceSupabase
       .from('email_threads')
       .select('*, inbox:inboxes(*)')
       .eq('id', threadId)
