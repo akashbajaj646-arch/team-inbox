@@ -103,13 +103,21 @@ export function parseHeaders(headers: Array<{ name: string; value: string }>) {
 
 // Parse email address from header value like "Name <email@example.com>"
 export function parseEmailAddress(value: string): { name: string | null; address: string } {
-  const match = value.match(/^(?:"?([^"]*)"?\s*)?<?([^>]+@[^>]+)>?$/);
+  if (!value) return { name: null, address: '' };
   
-  if (match) {
+  // Format: "Name <email@domain.com>" or "<email@domain.com>"
+  const angleMatch = value.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  if (angleMatch) {
     return {
-      name: match[1]?.trim() || null,
-      address: match[2].trim(),
+      name: angleMatch[1].trim() || null,
+      address: angleMatch[2].trim(),
     };
+  }
+  
+  // Plain email address
+  const emailMatch = value.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  if (emailMatch) {
+    return { name: null, address: emailMatch[0].trim() };
   }
   
   return { name: null, address: value.trim() };
