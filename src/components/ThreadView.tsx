@@ -587,6 +587,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                 </button>
               </div>
             </div>
+          )}
         </div>
 
       </div>{/* end main thread column */}
