@@ -126,7 +126,7 @@ async function syncThread(
   } else {
     const { data: newThread } = await supabase
       .from('email_threads')
-      .insert({
+      .upsert({
         inbox_id: inboxId,
         gmail_thread_id: gmailThread.id,
         subject: headers.subject || '(No subject)',
@@ -134,7 +134,7 @@ async function syncThread(
         last_message_at: new Date(parseInt(lastMessage.internalDate)).toISOString(),
         is_read: !lastMessage.labelIds?.includes('UNREAD'),
         is_archived: !lastMessage.labelIds?.includes('INBOX'),
-      })
+      }, { onConflict: 'inbox_id,gmail_thread_id' })
       .select()
       .single();
 
