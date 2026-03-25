@@ -469,10 +469,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
             ))}
           </div>
 
-          {/* Team Discussion */}
-          <div className="max-w-4xl mt-8 pt-6 border-t-2 border-analog-border-strong">
-            <CommentSection threadId={threadId} currentUser={currentUser} />
-          </div>
         </div>
 
         {/* Composer */}
@@ -634,8 +630,13 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       </div>{/* end main thread column */}
 
       {/* Right sidebar */}
-      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
-        <CustomerCard email={senderEmail} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
+      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white flex flex-col">
+        <div className="flex-1 overflow-y-auto px-4 py-5 border-b border-stone-200" style={{maxHeight: '50%'}}>
+          <CustomerCard email={senderEmail} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-5" style={{maxHeight: '50%'}}>
+          <CommentSection threadId={threadId} currentUser={currentUser} />
+        </div>
       </div>
 
     </div>
