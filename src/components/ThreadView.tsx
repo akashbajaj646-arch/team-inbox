@@ -38,7 +38,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [loading, setLoading] = useState(true);
   const [replyBody, setReplyBody] = useState('');
   const [sending, setSending] = useState(false);
-  const [showComposer, setShowComposer] = useState(false);
+  const [showComposer, setShowComposer] = useState(true);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [ccField, setCcField] = useState('');
@@ -473,44 +473,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
         {/* Composer */}
         <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-8 py-5">
-          {!showComposer ? (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowComposer(true)}
-                className="flex-1 px-5 py-3.5 bg-analog-surface border border-analog-border rounded-lg text-analog-text-placeholder text-left hover:border-analog-accent transition-all duration-150"
-              >
-                Write a reply...
-              </button>
-              <button
-                onClick={handleAiAssist}
-                disabled={aiLoading}
-                className="px-4 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-all duration-150 flex items-center gap-2 disabled:opacity-50"
-              >
-                {aiLoading ? (
-                  <>
-                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Drafting...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
-                    </svg>
-                    AI Assist
-                  </>
-                )}
-              </button>
-              {thread && (
-                <TemplatePicker
-                  inboxId={thread.inbox_id}
-                  onSelect={handleTemplateSelect}
-                />
-              )}
-            </div>
-          ) : (
+          {(
             <div className="space-y-4">
               <div className="space-y-2">
                 {!showCcBcc ? (
@@ -624,7 +587,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                 </button>
               </div>
             </div>
-          )}
         </div>
 
       </div>{/* end main thread column */}
