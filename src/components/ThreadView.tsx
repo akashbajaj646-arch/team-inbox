@@ -515,7 +515,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                       </svg>
                     </button>
                     {openMenuId === message.id && (
-                      <div className="absolute right-0 top-8 z-50 w-56 bg-white border border-analog-border rounded-xl shadow-lg overflow-hidden">
+                      <div className="absolute right-0 top-8 z-50 w-64 bg-white border border-analog-border rounded-xl shadow-lg overflow-hidden">
                         <button onClick={() => handleForward(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                           Forward
@@ -525,8 +525,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                           Resend
                         </button>
                         <button onClick={() => handleResendAsNew(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
-                          Resend as New Conversation
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+                          <span className="whitespace-nowrap">Resend as New Conversation</span>
                         </button>
                         <div className="border-t border-analog-border my-1"/>
                         <button onClick={handleMarkUnread} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
