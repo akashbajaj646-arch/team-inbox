@@ -45,7 +45,8 @@ export async function POST(request: Request) {
       .single();
 
     if (threadError || !thread) {
-      return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
+      console.error('Thread lookup failed:', { threadId, threadError, thread });
+      return NextResponse.json({ error: 'Thread not found', threadId, dbError: threadError?.message }, { status: 404 });
     }
 
     // Verify user has access to this inbox
