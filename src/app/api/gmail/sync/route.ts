@@ -71,6 +71,14 @@ export async function POST(request: Request) {
           if (existingMessage) {
             messageId = existingMessage.id;
 
+            // Fix from_address and from_name for existing messages
+            const fixHeaders = parseHeaders(message.payload.headers);
+            const fixFrom = parseEmailAddress(fixHeaders.from || '');
+            await serviceSupabase
+              .from('email_messages')
+              .update({ from_address: fixFrom.address, from_name: fixFrom.name })
+              .eq('id', messageId);
+
             // Backfill attachments for existing messages that don't have them yet
             const { count } = await serviceSupabase
               .from('email_attachments')
