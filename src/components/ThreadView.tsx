@@ -342,6 +342,15 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setOpenMenuId(null);
   }
 
+  function resolveInlineImages(html: string, messageId: string, inboxId: string): string {
+    if (!html) return html;
+    // Replace cid: references with our proxy URL
+    return html.replace(/src="cid:([^"]+)"/g, (_, cid) => {
+      // Find the attachment by content ID from the email_attachments table
+      return `src="/api/gmail/image?messageId=${messageId}&attachmentId=${encodeURIComponent(cid)}&inboxId=${inboxId}"`;
+    });
+  }
+
   function formatDate(dateString: string) {
     const date = new Date(dateString);
     return date.toLocaleDateString([], {
@@ -551,7 +560,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   {message.body_html ? (
                     <div
                       className="email-prose"
-                      dangerouslySetInnerHTML={{ __html: message.body_html }}
+                      dangerouslySetInnerHTML={{ __html: resolveInlineImages(message.body_html, message.gmail_message_id || '', thread?.inbox_id || '') }}
                     />
                   ) : (
                     <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
