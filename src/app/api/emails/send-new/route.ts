@@ -51,17 +51,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Inbox not connected to Google' }, { status: 400 });
     }
 
-    const ccHeader = cc ? `Cc: ${cc}\r\n` : '';
-    const email = [
+    const emailLines = [
       `To: ${to}`,
       `From: ${inbox.email_address}`,
-      ccHeader.trim(),
+      ...(cc ? [`Cc: ${cc}`] : []),
       `Subject: ${subject}`,
       'MIME-Version: 1.0',
       'Content-Type: text/html; charset=utf-8',
       '',
       body,
-    ].filter(Boolean).join('\r\n');
+    ];
+    const email = emailLines.join('\r\n');
 
     const encodedEmail = Buffer.from(email).toString('base64url');
 
