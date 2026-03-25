@@ -37,10 +37,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get thread with inbox info
+    // Get thread
     const { data: thread, error: threadError } = await serviceSupabase
       .from('email_threads')
-      .select('*, inbox:inboxes(*)')
+      .select('*')
       .eq('id', threadId)
       .single();
 
