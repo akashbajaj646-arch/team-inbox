@@ -31,7 +31,7 @@ export default function TemplatesManager({ inbox, currentUser, isAdmin }: Templa
 
   async function loadTemplates() {
     setLoading(true);
-    
+
     const { data, error } = await supabase
       .from('templates')
       .select('*')
@@ -44,7 +44,7 @@ export default function TemplatesManager({ inbox, currentUser, isAdmin }: Templa
     } else {
       setTemplates(data || []);
     }
-    
+
     setLoading(false);
   }
 
@@ -148,7 +148,7 @@ export default function TemplatesManager({ inbox, currentUser, isAdmin }: Templa
       {/* Header */}
       <div className="px-6 py-5 border-b-2 border-analog-border-strong flex items-center justify-between">
         <h2 className="font-display text-lg font-medium text-analog-text">Response Templates</h2>
-        {isAdmin && !showForm && (
+        {!showForm && (
           <button onClick={handleNew} className="btn btn-secondary text-sm">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -171,7 +171,7 @@ export default function TemplatesManager({ inbox, currentUser, isAdmin }: Templa
             <h3 className="font-medium text-analog-text mb-4">
               {editingTemplate ? 'Edit Template' : 'New Template'}
             </h3>
-            
+
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -243,11 +243,9 @@ export default function TemplatesManager({ inbox, currentUser, isAdmin }: Templa
               </svg>
             </div>
             <p className="text-analog-text-muted mb-2">No templates yet</p>
-            {isAdmin && (
-              <button onClick={handleNew} className="text-analog-accent hover:underline text-sm font-medium">
-                Create your first template
-              </button>
-            )}
+            <button onClick={handleNew} className="text-analog-accent hover:underline text-sm font-medium">
+              Create your first template
+            </button>
           </div>
         ) : (
           <div className="space-y-6">
@@ -268,26 +266,24 @@ export default function TemplatesManager({ inbox, currentUser, isAdmin }: Templa
                           {template.body}
                         </p>
                       </div>
-                      {isAdmin && (
-                        <div className="flex items-center gap-1 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => handleEdit(template)}
-                            className="p-2 text-analog-text-muted hover:text-analog-text hover:bg-analog-hover rounded-lg transition-all duration-150"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDelete(template.id)}
-                            className="p-2 text-analog-text-muted hover:text-analog-error hover:bg-analog-error/10 rounded-lg transition-all duration-150"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => handleEdit(template)}
+                          className="p-2 text-analog-text-muted hover:text-analog-text hover:bg-analog-hover rounded-lg transition-all duration-150"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(template.id)}
+                          className="p-2 text-analog-text-muted hover:text-analog-error hover:bg-analog-error/10 rounded-lg transition-all duration-150"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
