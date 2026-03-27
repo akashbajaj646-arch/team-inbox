@@ -15,6 +15,15 @@ interface Attachment {
   type: string;
 }
 
+interface EmailAttachment {
+  id: string;
+  message_id: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  is_inline: boolean;
+}
+
 interface SentByUser {
   id: string;
   name: string;
@@ -38,14 +47,14 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [loading, setLoading] = useState(true);
   const [replyBody, setReplyBody] = useState('');
   const [sending, setSending] = useState(false);
-  const [showComposer, setShowComposer] = useState(true);
+  const [showComposer, setShowComposer] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [ccField, setCcField] = useState('');
   const [bccField, setBccField] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [messageAttachments, setMessageAttachments] = useState<Record<string, EmailAttachment[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
 
@@ -126,6 +135,31 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       .order('sent_at', { ascending: true });
 
     setMessages(data || []);
+
+    // Fetch non-inline attachments for all messages
+    if (data && data.length > 0) {
+      await loadAttachmentsForMessages(data.map((m: any) => m.id));
+    }
+  }
+
+  async function loadAttachmentsForMessages(messageIds: string[]) {
+    if (messageIds.length === 0) return;
+
+    const { data } = await supabase
+      .from('email_attachments')
+      .select('id, message_id, filename, mime_type, size, is_inline')
+      .in('message_id', messageIds)
+      .eq('is_inline', false)
+      .order('filename', { ascending: true });
+
+    if (data) {
+      const byMessage: Record<string, EmailAttachment[]> = {};
+      data.forEach((att: EmailAttachment) => {
+        if (!byMessage[att.message_id]) byMessage[att.message_id] = [];
+        byMessage[att.message_id].push(att);
+      });
+      setMessageAttachments(byMessage);
+    }
   }
 
   async function loadPresence() {
@@ -162,7 +196,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
     try {
       const uploadedAttachments: { filename: string; mimeType: string; data: string }[] = [];
-      
+
       for (const attachment of attachments) {
         const base64 = await fileToBase64(attachment.file);
         uploadedAttachments.push({
@@ -235,15 +269,28 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setAttachments(attachments.filter((_, i) => i !== index));
   }
 
+  async function handleDownloadAll(atts: EmailAttachment[]) {
+    for (const att of atts) {
+      const a = document.createElement('a');
+      a.href = `/api/gmail/attachment?id=${att.id}`;
+      a.download = att.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Stagger downloads so the browser doesn't block them
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+
   async function handleAiAssist() {
     if (!thread || messages.length === 0) return;
-    
+
     setAiLoading(true);
     setShowComposer(true);
-    
+
     try {
       const inboundMessage = messages.find(m => !m.is_outbound) || messages[0];
-      
+
       const response = await fetch('/api/ai-assist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,15 +302,15 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
             body_html: m.body_html,
             from_name: m.from_name,
             from_address: m.from_address,
-            sent_at: m.sent_at
+            sent_at: m.sent_at,
           })),
           senderEmail: inboundMessage.from_address,
-          senderName: inboundMessage.from_name
-        })
+          senderName: inboundMessage.from_name,
+        }),
       });
 
       const data = await response.json();
-      
+
       if (data.draft) {
         const htmlDraft = data.draft
           .split('\n\n')
@@ -276,7 +323,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     } catch (error) {
       alert('Failed to generate AI draft. Please try again.');
     }
-    
+
     setAiLoading(false);
   }
 
@@ -289,66 +336,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   function handleTemplateSelect(template: Template) {
     setReplyBody(template.body);
     if (!showComposer) setShowComposer(true);
-  }
-
-  async function handleMarkUnread() {
-    await supabase.from('email_threads').update({ is_read: false }).eq('id', threadId);
-    setOpenMenuId(null);
-  }
-
-  async function handleDelete() {
-    if (!confirm('Delete this thread? This cannot be undone.')) return;
-    await supabase.from('email_threads').update({ deleted_at: new Date().toISOString() }).eq('id', threadId);
-    setOpenMenuId(null);
-  }
-
-  function handlePrint() {
-    window.print();
-    setOpenMenuId(null);
-  }
-
-  function handleForward(message: EmailMessageWithUser) {
-    const fwdBody = `<br/><br/>---------- Forwarded message ----------<br/>${message.body_html || message.body_text || ''}`;
-    setReplyBody(fwdBody);
-    setOpenMenuId(null);
-  }
-
-  async function handleResend(message: EmailMessageWithUser) {
-    const response = await fetch('/api/emails/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threadId, body: message.body_html || message.body_text || '' }),
-    });
-    if (response.ok) {
-      await loadMessages();
-    }
-    setOpenMenuId(null);
-  }
-
-  async function handleResendAsNew(message: EmailMessageWithUser) {
-    const response = await fetch('/api/emails/send-new', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        inboxId: thread?.inbox_id,
-        to: message.to_addresses?.[0] || '',
-        subject: thread?.subject || '',
-        body: message.body_html || message.body_text || '',
-      }),
-    });
-    if (response.ok) {
-      alert('Sent as new conversation.');
-    }
-    setOpenMenuId(null);
-  }
-
-  function resolveInlineImages(html: string, messageId: string, inboxId: string): string {
-    if (!html) return html;
-    // Replace cid: references with our proxy URL
-    return html.replace(/src="cid:([^"]+)"/g, (_, cid) => {
-      // Find the attachment by content ID from the email_attachments table
-      return `src="/api/gmail/image?messageId=${messageId}&attachmentId=${encodeURIComponent(cid)}&inboxId=${inboxId}"`;
-    });
   }
 
   function formatDate(dateString: string) {
@@ -405,207 +392,237 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const senderEmail = messages.find(m => !m.is_outbound)?.from_address || messages[0]?.from_address;
   const senderName = messages.find(m => !m.is_outbound)?.from_name || messages[0]?.from_name;
 
-  // Priority: customer linked name > sender name > sender email
   const headerName = customerLinkedName || senderName || senderEmail || '';
   const headerSubtitle = customerLinkedName
-    ? (senderName ? `${senderName} • ${senderEmail}` : senderEmail)
-    : senderEmail;
+    ? (senderName ? senderName : senderEmail) || ''
+    : senderEmail || '';
 
   return (
-    <div className="flex-1 flex flex-row h-screen bg-analog-surface overflow-hidden">
-
+    <div className="flex-1 flex overflow-hidden">
       {/* Main thread column */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* Header */}
-        <div className="px-8 py-5 border-b-2 border-analog-border-strong bg-analog-surface">
-          <h2 className="font-display text-2xl font-medium text-analog-text mb-4">
-            {thread.subject || '(No subject)'}
-          </h2>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3 flex-1">
-              <div className="avatar avatar-lg avatar-blue font-display">
-                {headerName.charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <p className="font-semibold text-[15px] text-analog-text">
-                  {headerName}
-                </p>
-                {headerSubtitle && headerSubtitle !== headerName && (
-                  <p className="text-[13px] text-analog-text-faint">
-                    {headerSubtitle}
-                  </p>
-                )}
-              </div>
+        {/* Thread header */}
+        <div className="px-8 py-4 border-b-2 border-analog-border-strong bg-analog-surface flex items-center gap-4 flex-shrink-0">
+          <div className="flex-1 min-w-0">
+            <h1 className="font-display text-lg font-semibold text-analog-text truncate">
+              {thread.subject || '(No subject)'}
+            </h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-sm text-analog-text-muted truncate">{headerName}</p>
+              {headerSubtitle && headerSubtitle !== headerName && (
+                <span className="text-analog-text-faint text-sm">· {headerSubtitle}</span>
+              )}
             </div>
-
-            {/* Presence Badge */}
-            {(drafting.length > 0 || viewing.length > 0) && (
-              <div className="flex items-center gap-2 px-3.5 py-2 bg-analog-hover border border-analog-border rounded-lg">
-                <div 
-                  className="presence-dot"
-                  style={{ background: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}
-                />
-                <span className="text-xs font-medium" style={{ color: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}>
-                  {drafting.length > 0
-                    ? `${drafting.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is drafting`
-                    : `${viewing.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is viewing`}
-                </span>
-              </div>
-            )}
-
-            {/* Open in New Window */}
-            <button
-              onClick={() => window.open(`/email/${threadId}`, '_blank', 'noopener,noreferrer')}
-              className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150"
-              title="Open in new window"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </button>
           </div>
+
+          {/* Presence indicators */}
+          {(drafting.length > 0 || viewing.length > 0) && (
+            <div className="flex items-center gap-2">
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}
+              />
+              <span className="text-xs font-medium" style={{ color: drafting.length > 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)' }}>
+                {drafting.length > 0
+                  ? `${drafting.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is drafting`
+                  : `${viewing.map((p) => p.user?.name?.split(' ')[0] || 'Someone').join(', ')} is viewing`}
+              </span>
+            </div>
+          )}
+
+          {/* Open in New Window */}
+          <button
+            onClick={() => window.open(`/email/${threadId}`, '_blank', 'noopener,noreferrer')}
+            className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-hover rounded-lg transition-all duration-150"
+            title="Open in new window"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </button>
         </div>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-8 py-6">
           <div className="max-w-4xl space-y-5">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`bg-analog-surface-alt border rounded-lg overflow-hidden ${
-                  message.is_outbound
-                    ? 'border-analog-accent border-l-4'
-                    : 'border-analog-border'
-                }`}
-              >
-                {/* Message Header */}
-                <div className={`px-5 py-4 border-b border-analog-border flex items-center gap-3 ${
-                  message.is_outbound ? 'bg-[#FDF8F7]' : 'bg-analog-surface'
-                }`}>
-                  <div className={`avatar avatar-md font-display ${
-                    message.is_outbound ? 'avatar-red' : 'avatar-blue'
+            {messages.map((message) => {
+              const msgAttachments = messageAttachments[message.id] || [];
+
+              return (
+                <div
+                  key={message.id}
+                  className={`bg-analog-surface-alt border rounded-lg overflow-hidden ${
+                    message.is_outbound
+                      ? 'border-analog-accent border-l-4'
+                      : 'border-analog-border'
+                  }`}
+                >
+                  {/* Message Header */}
+                  <div className={`px-5 py-4 border-b border-analog-border flex items-center gap-3 ${
+                    message.is_outbound ? 'bg-[#FDF8F7]' : 'bg-analog-surface'
                   }`}>
-                    {(message.from_name || message.from_address).charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-sm text-analog-text">
-                      {message.from_name || message.from_address}
-                    </p>
-                  </div>
-
-                  {message.is_outbound && message.sent_by && (
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getBubbleColor(message.sent_by.id)}`}
-                        title={message.sent_by.name || message.sent_by.email}
-                      >
-                        {getInitials(message.sent_by.name, message.sent_by.email)}
-                      </div>
-                      <span className="text-xs text-analog-text-muted">
-                        {message.sent_by.name?.split(' ')[0] || message.sent_by.email.split('@')[0]}
-                      </span>
+                    <div className={`avatar avatar-md font-display ${
+                      message.is_outbound ? 'avatar-red' : 'avatar-blue'
+                    }`}>
+                      {(message.from_name || message.from_address).charAt(0).toUpperCase()}
                     </div>
-                  )}
+                    <div className="flex-1">
+                      <p className="font-semibold text-sm text-analog-text">
+                        {message.from_name || message.from_address}
+                      </p>
+                    </div>
 
-                  <span className="text-xs text-analog-text-placeholder">
-                    {formatDate(message.sent_at)}
-                  </span>
-
-                  {/* Actions Menu */}
-                  <div className="relative">
-                    <button
-                      onClick={() => setOpenMenuId(openMenuId === message.id ? null : message.id)}
-                      className="p-1.5 rounded-lg text-analog-text-muted hover:text-analog-text hover:bg-analog-hover transition-all"
-                      title="More actions"
-                    >
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                        <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
-                      </svg>
-                    </button>
-                    {openMenuId === message.id && (
-                      <div className="absolute right-0 top-8 z-50 w-64 bg-white border border-analog-border rounded-xl shadow-lg overflow-hidden">
-                        <button onClick={() => handleForward(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                          Forward
-                        </button>
-                        <button onClick={() => handleResend(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                          Resend
-                        </button>
-                        <button onClick={() => handleResendAsNew(message)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
-                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
-                          <span className="whitespace-nowrap">Resend as New Conversation</span>
-                        </button>
-                        <div className="border-t border-analog-border my-1"/>
-                        <button onClick={handleMarkUnread} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                          Mark as Unread
-                        </button>
-                        <button onClick={handleDelete} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                          Delete
-                        </button>
-                        <button onClick={handlePrint} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-analog-text hover:bg-analog-hover transition-colors">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-                          Print
-                        </button>
+                    {message.is_outbound && message.sent_by && (
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getBubbleColor(message.sent_by.id)}`}
+                          title={message.sent_by.name || message.sent_by.email}
+                        >
+                          {getInitials(message.sent_by.name, message.sent_by.email)}
+                        </div>
+                        <span className="text-xs text-analog-text-muted">
+                          {message.sent_by.name?.split(' ')[0] || message.sent_by.email.split('@')[0]}
+                        </span>
                       </div>
                     )}
-                  </div>
-                </div>
 
-                {/* Message Body */}
-                <div className="px-5 py-5 overflow-x-auto">
-                  {message.body_html ? (
-                    <div
-                      className="email-prose"
-                      dangerouslySetInnerHTML={{ __html: resolveInlineImages(message.body_html, message.gmail_message_id || '', thread?.inbox_id || '') }}
-                    />
-                  ) : (
-                    <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
-                      {message.body_text}
-                    </p>
+                    <span className="text-xs text-analog-text-placeholder">
+                      {formatDate(message.sent_at)}
+                    </span>
+                  </div>
+
+                  {/* Message Body */}
+                  <div className="px-5 py-5 overflow-x-auto">
+                    {message.body_html ? (
+                      <div
+                        className="email-prose"
+                        dangerouslySetInnerHTML={{ __html: message.body_html }}
+                      />
+                    ) : (
+                      <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
+                        {message.body_text}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Attachments */}
+                  {msgAttachments.length > 0 && (
+                    <div className="px-5 pb-4 pt-3 border-t border-analog-border">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="text-[11px] font-semibold text-analog-text-faint uppercase tracking-wider">
+                          {msgAttachments.length} Attachment{msgAttachments.length > 1 ? 's' : ''}
+                        </span>
+                        {msgAttachments.length > 1 && (
+                          <button
+                            onClick={() => handleDownloadAll(msgAttachments)}
+                            className="text-xs text-analog-accent hover:underline font-medium flex items-center gap-1"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            Download all
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {msgAttachments.map((att) => (
+                          <a
+                            key={att.id}
+                            href={`/api/gmail/attachment?id=${att.id}`}
+                            download={att.filename}
+                            className="flex items-center gap-2 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg text-sm hover:bg-analog-hover hover:border-analog-accent transition-all duration-150 group"
+                          >
+                            <svg className="w-4 h-4 text-analog-text-muted group-hover:text-analog-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                            <span className="text-analog-text truncate max-w-[180px]">{att.filename}</span>
+                            <span className="text-analog-text-faint text-xs flex-shrink-0">({formatFileSize(att.size)})</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
+          {/* Team Discussion */}
+          <div className="max-w-4xl mt-8 pt-6 border-t-2 border-analog-border-strong">
+            <CommentSection threadId={threadId} currentUser={currentUser} />
+          </div>
         </div>
 
         {/* Composer */}
         <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-8 py-5">
-          {(
+          {!showComposer ? (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowComposer(true)}
+                className="flex-1 px-5 py-3.5 bg-analog-surface border border-analog-border rounded-lg text-analog-text-placeholder text-left hover:border-analog-accent transition-all duration-150"
+              >
+                Write a reply...
+              </button>
+              <button
+                onClick={handleAiAssist}
+                disabled={aiLoading}
+                className="px-4 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-all duration-150 flex items-center gap-2 disabled:opacity-50"
+              >
+                {aiLoading ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Drafting...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                    </svg>
+                    AI Assist
+                  </>
+                )}
+              </button>
+              {thread && (
+                <TemplatePicker
+                  inboxId={thread.inbox_id}
+                  onSelect={handleTemplateSelect}
+                />
+              )}
+            </div>
+          ) : (
             <div className="space-y-4">
               <div className="space-y-2">
                 {!showCcBcc ? (
                   <button
                     onClick={() => setShowCcBcc(true)}
-                    className="text-sm text-analog-accent hover:underline"
+                    className="text-xs text-analog-text-faint hover:text-analog-accent transition-colors"
                   >
-                    Add Cc/Bcc
+                    + Add Cc / Bcc
                   </button>
                 ) : (
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-analog-text-muted w-10">Cc:</label>
+                    <div className="flex items-center gap-3 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg">
+                      <span className="text-xs font-semibold text-analog-text-faint w-8 flex-shrink-0">Cc</span>
                       <input
                         type="text"
                         value={ccField}
                         onChange={(e) => setCcField(e.target.value)}
-                        placeholder="email@example.com, another@example.com"
-                        className="input flex-1 py-2 text-sm"
+                        placeholder="cc@example.com"
+                        className="flex-1 bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none"
                       />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-analog-text-muted w-10">Bcc:</label>
+                    <div className="flex items-center gap-3 px-3 py-2 bg-analog-surface border border-analog-border rounded-lg">
+                      <span className="text-xs font-semibold text-analog-text-faint w-8 flex-shrink-0">Bcc</span>
                       <input
                         type="text"
                         value={bccField}
                         onChange={(e) => setBccField(e.target.value)}
-                        placeholder="email@example.com, another@example.com"
-                        className="input flex-1 py-2 text-sm"
+                        placeholder="bcc@example.com"
+                        className="flex-1 bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none"
                       />
                     </div>
                   </div>
@@ -616,8 +633,10 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                 content={replyBody}
                 onChange={setReplyBody}
                 placeholder="Write your reply..."
+                inboxId={thread?.inbox_id}
               />
 
+              {/* Reply attachments */}
               {attachments.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {attachments.map((attachment, index) => (
@@ -655,7 +674,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   >
                     Cancel
                   </button>
-                  
+
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -696,13 +715,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       </div>{/* end main thread column */}
 
       {/* Right sidebar */}
-      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white flex flex-col">
-        <div className="flex-1 overflow-y-auto px-4 py-5 border-b border-stone-200" style={{maxHeight: '50%'}}>
-          <CustomerCard email={senderEmail} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 py-5" style={{maxHeight: '50%'}}>
-          <CommentSection threadId={threadId} currentUser={currentUser} />
-        </div>
+      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
+        <CustomerCard email={senderEmail} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
       </div>
 
     </div>
