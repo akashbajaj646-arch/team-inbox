@@ -633,7 +633,6 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                 content={replyBody}
                 onChange={setReplyBody}
                 placeholder="Write your reply..."
-                inboxId={thread?.inbox_id}
               />
 
               {/* Reply attachments */}
