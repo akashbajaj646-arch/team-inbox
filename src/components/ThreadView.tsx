@@ -535,6 +535,37 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                     <span className="text-xs text-analog-text-placeholder">
                       {formatDate(message.sent_at)}
                     </span>
+
+                  {/* Action menu */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setActiveActionMenu(activeActionMenu === message.id ? null : message.id)}
+                      className="p-1.5 rounded-md text-analog-text-faint hover:text-analog-text hover:bg-analog-hover transition-all"
+                    >
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                        <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
+                      </svg>
+                    </button>
+                    {activeActionMenu === message.id && (
+                      <div className="absolute right-0 top-8 w-48 bg-analog-surface border border-analog-border-strong rounded-xl shadow-analog-lg z-50 overflow-hidden">
+                        {[
+                          { label: "Forward", fn: () => handleForwardMessage(message) },
+                          { label: "Resend", fn: () => handleResendMessage(message) },
+                          { label: "Mark Unread", fn: () => handleMarkUnread(message.id) },
+                          { label: "Print", fn: () => handlePrintMessage(message) },
+                          { label: "Delete", fn: () => handleDeleteMessage(message.id), danger: true },
+                        ].map(({ label, fn, danger }) => (
+                          <button
+                            key={label}
+                            onClick={fn}
+                            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-analog-hover transition-colors ${danger ? "text-red-500" : "text-analog-text"}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   </div>
 
                   {/* Message Body */}
