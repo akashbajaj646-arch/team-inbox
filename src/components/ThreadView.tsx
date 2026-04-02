@@ -497,7 +497,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
               return (
                 <div
                   key={message.id}
-                  className={`bg-analog-surface-alt border rounded-lg overflow-hidden ${
+                  className={`group bg-analog-surface-alt border rounded-lg overflow-hidden ${
                     message.is_outbound
                       ? 'border-analog-accent border-l-4'
                       : 'border-analog-border'
