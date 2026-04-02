@@ -36,7 +36,6 @@ export default function TemplatePicker({ inboxId, onSelect }: TemplatePickerProp
     const { data } = await supabase
       .from('templates')
       .select('*')
-      .eq('inbox_id', inboxId)
       .order('category', { ascending: true })
       .order('name', { ascending: true });
 
