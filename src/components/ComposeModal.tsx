@@ -435,6 +435,10 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           >
             Discard
           </button>
+          <TemplatePicker
+            inboxId={inbox.id}
+            onSelect={handleTemplateSelect}
+          />
           <button
             onClick={handleSend}
             disabled={sending}
