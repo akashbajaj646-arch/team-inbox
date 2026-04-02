@@ -347,7 +347,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   }
 
   function handleForwardMessage(message: EmailMessageWithUser) {
-    const fwdBody = \`<br/><br/>---------- Forwarded message ----------<br/>From: \${message.from_name || message.from_address}<br/><br/>\${message.body_html || message.body_text || ''}\`;
+    const fwdBody = `<br/><br/>---------- Forwarded message ----------<br/>From: ${message.from_name || message.from_address}<br/><br/>${message.body_html || message.body_text || ''}` ;
     setReplyBody(fwdBody);
     setShowComposer(true);
     setActiveActionMenu(null);
