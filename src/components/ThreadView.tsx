@@ -366,7 +366,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   function handlePrintMessage(message: EmailMessageWithUser) {
     const w = window.open('', '_blank');
     if (!w) return;
-    w.document.write(\`<html><body>\${message.body_html || message.body_text || ''}</body></html>\`);
+    w.document.write(`<html><body>${message.body_html || message.body_text || ''}</body></html>`);
     w.document.close();
     w.print();
     setActiveActionMenu(null);
