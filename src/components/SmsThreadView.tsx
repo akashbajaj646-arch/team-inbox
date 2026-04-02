@@ -6,6 +6,7 @@ import type { SmsThread, SmsMessage, User, Inbox, Contact } from '@/types';
 import CommentSection from './CommentSection';
 import SkuPicker from './SkuPicker';
 import CustomerCard from './CustomerCard';
+import TemplatePicker from './TemplatePicker';
 import WhatsAppTemplatePicker from './WhatsAppTemplatePicker';
 
 interface Product {
@@ -225,6 +226,11 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
     });
     setThread(prev => prev ? { ...prev, contact_name: contactName.trim() || null } : prev);
     setEditingName(false);
+  }
+
+  function handleTemplateSelect(template: any) {
+    setNewMessage(template.body);
+    textareaRef.current?.focus();
   }
 
   function formatTime(dateString: string) {
@@ -477,6 +483,12 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
             )}
 
             <div className="flex items-end gap-3">
+              {thread && (
+                <TemplatePicker
+                  inboxId={thread.inbox_id}
+                  onSelect={handleTemplateSelect}
+                />
+              )}
               <input
                 ref={fileInputRef}
                 type="file"

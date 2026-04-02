@@ -47,13 +47,14 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [loading, setLoading] = useState(true);
   const [replyBody, setReplyBody] = useState('');
   const [sending, setSending] = useState(false);
-  const [showComposer, setShowComposer] = useState(false);
+  const [showComposer, setShowComposer] = useState(true);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [ccField, setCcField] = useState('');
   const [bccField, setBccField] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
+  const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
   const [messageAttachments, setMessageAttachments] = useState<Record<string, EmailAttachment[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
@@ -325,6 +326,50 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     }
 
     setAiLoading(false);
+  }
+
+  async function handleMarkUnread(messageId: string) {
+    await fetch('/api/emails/mark-unread', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId }),
+    });
+    setActiveActionMenu(null);
+    loadThread();
+  }
+
+  async function handleDeleteMessage(messageId: string) {
+    if (!confirm('Delete this message?')) return;
+    const supabase2 = createClient();
+    await supabase2.from('email_messages').delete().eq('id', messageId);
+    setActiveActionMenu(null);
+    loadMessages();
+  }
+
+  function handleForwardMessage(message: EmailMessageWithUser) {
+    const fwdBody = \`<br/><br/>---------- Forwarded message ----------<br/>From: \${message.from_name || message.from_address}<br/><br/>\${message.body_html || message.body_text || ''}\`;
+    setReplyBody(fwdBody);
+    setShowComposer(true);
+    setActiveActionMenu(null);
+  }
+
+  async function handleResendMessage(message: EmailMessageWithUser) {
+    if (!thread) return;
+    await fetch('/api/emails/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId: thread.id, body: message.body_html || message.body_text || '' }),
+    });
+    setActiveActionMenu(null);
+  }
+
+  function handlePrintMessage(message: EmailMessageWithUser) {
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(\`<html><body>\${message.body_html || message.body_text || ''}</body></html>\`);
+    w.document.close();
+    w.print();
+    setActiveActionMenu(null);
   }
 
   function formatFileSize(bytes: number): string {
