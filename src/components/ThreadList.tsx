@@ -31,7 +31,6 @@ export default function ThreadList({
   const [activeView, setActiveView] = useState<EmailView>('all');
   const [contactNames, setContactNames] = useState<Map<string, string>>(new Map());
   const [threadsWithAttachments, setThreadsWithAttachments] = useState<Set<string>>(new Set());
-  const [threadsWithAttachments, setThreadsWithAttachments] = useState<Set<string>>(new Set());
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
