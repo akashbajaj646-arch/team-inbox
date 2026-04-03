@@ -448,19 +448,12 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
             </div>
           )}
 
-          {/* Team Discussion */}
-          <div className="max-w-2xl mx-auto mt-8 pt-6 border-t-2 border-analog-border-strong">
-            <CommentSection
-              threadId={null}
-              smsThreadId={threadId}
-              currentUser={currentUser}
-            />
-          </div>
+
         </div>
 
         {/* Composer */}
-        <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-6 py-4">
-          <div className="max-w-2xl mx-auto relative">
+        <div className="border-t border-analog-border-light bg-analog-surface px-6 py-4">
+          <div className="max-w-2xl mx-auto">
             {mediaPreview && (
               <div className="mb-2 relative inline-block">
                 <img src={mediaPreview} alt="Attachment preview" className="h-20 rounded-lg border border-analog-border" />
@@ -482,48 +475,9 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
               </div>
             )}
 
-            <div className="flex items-end gap-3">
-              {thread && (
-                <TemplatePicker
-                  inboxId={thread.inbox_id}
-                  onSelect={handleTemplateSelect}
-                />
-              )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    setMediaFile(file);
-                    setMediaPreview(URL.createObjectURL(file));
-                  }
-                  e.target.value = '';
-                }}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-analog-border text-analog-text-muted hover:bg-analog-surface-alt transition-colors"
-                title="Attach image"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                </svg>
-              </button>
-
-              {isWhatsApp && (
-                <WhatsAppTemplatePicker
-                  inboxId={inbox.id}
-                  onSelect={(body, sid) => {
-                    setNewMessage(body);
-                    setContentSid(sid);
-                  }}
-                />
-              )}
-
-              <div className="flex-1 relative">
+            {/* Slack-style composer box */}
+            <div className="border border-analog-border rounded-xl overflow-hidden bg-analog-surface focus-within:border-analog-accent focus-within:shadow-[0_0_0_3px_rgba(0,91,196,0.08)] transition-all">
+              <div className="relative px-3 pt-3 pb-1">
                 <textarea
                   ref={textareaRef}
                   value={newMessage}
@@ -538,10 +492,10 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                     }
                     if (e.key === 'Escape' && showSkuPicker) setShowSkuPicker(false);
                   }}
-                  placeholder={isWhatsApp ? 'Reply (or use a template for new conversations)...' : 'Type a message... (use /sku: to search products)'}
-                  rows={1}
-                  className="input w-full resize-none"
-                  style={{ minHeight: '44px', maxHeight: '120px' }}
+                  placeholder={isWhatsApp ? 'Reply (or use a template for new conversations)...' : 'Type a message...'}
+                  rows={2}
+                  className="w-full bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none resize-none leading-relaxed"
+                  style={{ minHeight: '48px', maxHeight: '120px' }}
                 />
                 {showSkuPicker && (
                   <SkuPicker
@@ -552,27 +506,68 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   />
                 )}
               </div>
-              <button
-                onClick={handleSend}
-                disabled={(!newMessage.trim() && !mediaFile && !contentSid) || sending}
-                className="btn btn-primary disabled:opacity-50"
-              >
-                {sending ? (
-                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-                )}
-              </button>
+              <div className="flex items-center justify-between px-3 py-2 border-t border-analog-border-light">
+                <div className="flex items-center gap-1">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setMediaFile(file);
+                        setMediaPreview(URL.createObjectURL(file));
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-1.5 rounded-lg text-analog-text-faint hover:text-analog-text hover:bg-analog-hover transition-colors"
+                    title="Attach image"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                  </button>
+                  {thread && (
+                    <TemplatePicker
+                      inboxId={thread.inbox_id}
+                      onSelect={handleTemplateSelect}
+                    />
+                  )}
+                  {isWhatsApp && (
+                    <WhatsAppTemplatePicker
+                      inboxId={inbox.id}
+                      onSelect={(body, sid) => {
+                        setNewMessage(body);
+                        setContentSid(sid);
+                      }}
+                    />
+                  )}
+                </div>
+                <button
+                  onClick={handleSend}
+                  disabled={(!newMessage.trim() && !mediaFile && !contentSid) || sending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-analog-accent hover:bg-analog-accent-hover text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {sending ? (
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  )}
+                  Send
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-analog-text-faint mt-2">
-              {isWhatsApp
-                ? 'Press Enter to send • Use template button for new conversations outside 24hr window'
-                : 'Press Enter to send, Shift+Enter for new line • Type /sku: to insert product link'}
+            <p className="text-[10px] text-analog-text-placeholder mt-1.5 px-1">
+              {isWhatsApp ? 'Enter to send • Use template button for new conversations outside 24hr window' : 'Enter to send • Shift+Enter for new line • /sku: to insert product link'}
             </p>
           </div>
         </div>
@@ -580,8 +575,13 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
       </div>{/* end main SMS column */}
 
       {/* Right sidebar */}
-      <div className="w-72 flex-shrink-0 bg-analog-surface-alt overflow-y-auto px-4 py-5">
-        <CustomerCard phone={thread?.contact_phone || ''} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
+      <div className="w-72 flex-shrink-0 bg-analog-surface-alt flex flex-col">
+        <div className="overflow-y-auto px-4 py-5 border-b border-analog-border-light" style={{maxHeight: '50%'}}>
+          <CustomerCard phone={thread?.contact_phone || ''} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
+        </div>
+        <div className="overflow-y-auto px-4 py-5 flex-1">
+          <CommentSection threadId={null} smsThreadId={threadId} currentUser={currentUser} />
+        </div>
       </div>
 
     </div>
