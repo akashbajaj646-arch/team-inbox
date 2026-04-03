@@ -489,23 +489,23 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-8 py-6">
-          <div className="max-w-4xl space-y-5">
+        <div className="flex-1 overflow-y-auto px-8 py-8">
+          <div className="max-w-4xl space-y-4">
             {messages.map((message) => {
               const msgAttachments = messageAttachments[message.id] || [];
 
               return (
                 <div
                   key={message.id}
-                  className={`group bg-analog-surface-alt border rounded-lg overflow-hidden ${
+                  className={`group bg-white border rounded-xl overflow-hidden shadow-[0_1px_4px_rgba(42,52,57,0.06)] ${
                     message.is_outbound
-                      ? 'border-analog-accent border-l-4'
+                      ? 'border-[#005bc4] border-l-4'
                       : 'border-analog-border'
                   }`}
                 >
                   {/* Message Header */}
-                  <div className={`px-5 py-4 border-b border-analog-border flex items-center gap-3 ${
-                    message.is_outbound ? 'bg-[#FDF8F7]' : 'bg-analog-surface'
+                  <div className={`px-5 py-4 border-b border-analog-border-light flex items-center gap-3 ${
+                    message.is_outbound ? 'bg-[#eef3fb]' : 'bg-white'
                   }`}>
                     <div className={`avatar avatar-md font-display ${
                       message.is_outbound ? 'avatar-red' : 'avatar-blue'
@@ -569,7 +569,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   </div>
 
                   {/* Message Body */}
-                  <div className="px-5 py-5 overflow-x-auto">
+                  <div className="px-6 py-6 overflow-x-auto">
                     {message.body_html ? (
                       <div
                         className="email-prose"
@@ -628,7 +628,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
         </div>
 
         {/* Composer */}
-        <div className="border-t-2 border-analog-border-strong bg-analog-surface-alt px-8 py-5">
+        <div className="border-t border-analog-border-light bg-analog-surface px-8 py-5">
           {!showComposer ? (
             <div className="flex items-center gap-3">
               <button
