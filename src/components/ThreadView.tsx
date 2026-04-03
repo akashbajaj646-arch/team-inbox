@@ -1,4 +1,5 @@
 'use client';
+import React from 'react';
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -40,6 +41,36 @@ interface ThreadViewProps {
   currentUser: User;
 }
 
+function EmailIframe({ html }: { html: string }) {
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+
+  React.useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    const resize = () => {
+      if (iframe && doc.body) {
+        iframe.style.height = doc.body.scrollHeight + 'px';
+      }
+    };
+    setTimeout(resize, 100);
+    setTimeout(resize, 500);
+  }, [html]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      className="w-full border-0"
+      style={{ minHeight: '100px' }}
+    />
+  );
+}
+
 export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [thread, setThread] = useState<EmailThread | null>(null);
   const [messages, setMessages] = useState<EmailMessageWithUser[]>([]);
@@ -55,7 +86,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [aiLoading, setAiLoading] = useState(false);
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
-  const [messageAttachments, setMessageAttachments] = useState<Record<string, EmailAttachment[]>>({});
+  const [messageAttachments, setMessageAttachments] = useState<Record<string, any[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
 
@@ -162,6 +193,10 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       setMessageAttachments(byMessage);
     }
   }
+
+
+
+
 
   async function loadPresence() {
     const { data } = await supabase
@@ -571,10 +606,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   {/* Message Body */}
                   <div className="px-6 py-6 overflow-x-auto">
                     {message.body_html ? (
-                      <div
-                        className="email-prose"
-                        dangerouslySetInnerHTML={{ __html: message.body_html }}
-                      />
+                      <EmailIframe html={message.body_html} />
                     ) : (
                       <p className="font-body text-[15px] leading-relaxed text-analog-text-secondary whitespace-pre-wrap">
                         {message.body_text}
@@ -591,7 +623,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                         </span>
                         {msgAttachments.length > 1 && (
                           <button
-                            onClick={() => handleDownloadAll(msgAttachments)}
+                            onClick={() => { msgAttachments.forEach((att, i) => { setTimeout(() => { window.open(`/api/gmail/attachment?id=${att.id}`, '_blank'); }, i * 600); }); }}
                             className="text-xs text-analog-accent hover:underline font-medium flex items-center gap-1"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
