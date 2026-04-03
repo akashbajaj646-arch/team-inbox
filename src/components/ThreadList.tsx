@@ -30,6 +30,8 @@ export default function ThreadList({
   const [syncing, setSyncing] = useState(false);
   const [activeView, setActiveView] = useState<EmailView>('all');
   const [contactNames, setContactNames] = useState<Map<string, string>>(new Map());
+  const [threadsWithAttachments, setThreadsWithAttachments] = useState<Set<string>>(new Set());
+  const [threadsWithAttachments, setThreadsWithAttachments] = useState<Set<string>>(new Set());
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,6 +62,21 @@ export default function ThreadList({
       setDisplayedThreads(threads);
     }
   }, [searchQuery, searchField, searchMatch, threads]);
+
+  async function loadThreadAttachments(threadsList: EmailThread[]) {
+    if (threadsList.length === 0) return;
+    const threadIds = threadsList.map(t => t.id);
+    const { data } = await supabase
+      .from('email_attachments')
+      .select('thread_id')
+      .in('thread_id', threadIds)
+      .eq('is_inline', false)
+      .limit(500);
+    if (data) {
+      const set = new Set(data.map((a: any) => a.thread_id as string));
+      setThreadsWithAttachments(set);
+    }
+  }
 
   async function performSearch() {
     if (!searchQuery.trim()) { setDisplayedThreads(threads); return; }
@@ -218,6 +235,7 @@ export default function ThreadList({
     setThreads(matchingThreads);
     setDisplayedThreads(matchingThreads);
     loadContactNames(matchingThreads);
+    loadThreadAttachments(matchingThreads);
   }
 
   async function loadContactNames(threadsList: EmailThread[]) {
@@ -483,6 +501,11 @@ export default function ThreadList({
                       <div className="flex items-center gap-2.5 mt-3 pt-3 border-t border-analog-border-light">
                         {!thread.is_read && <span className="badge badge-primary">New</span>}
                         <span className="text-xs text-analog-text-placeholder">{formatDate(thread.last_message_at)}</span>
+                        {threadsWithAttachments.has(thread.id) && (
+                          <svg className="w-3.5 h-3.5 text-analog-text-faint flex-shrink-0 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                          </svg>
+                        )}
                       </div>
                     </div>
 
