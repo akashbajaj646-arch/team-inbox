@@ -76,6 +76,11 @@ export default function ThreadList({
     }
   }
 
+  function clearSearch() {
+    setSearchConfig(defaultConfig());
+    setDisplayedThreads(threads);
+  }
+
   async function performSearch() {
     if (!hasActiveSearch(searchConfig)) { setDisplayedThreads(threads); return; }
     setSearching(true);
