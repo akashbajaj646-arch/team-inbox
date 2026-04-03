@@ -34,6 +34,10 @@ export default function AllInboxesView({ currentUser }: AllInboxesViewProps) {
   const [hasSearched, setHasSearched] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [searchField, setSearchField] = useState<'all'|'from'|'subject'|'body'>('all');
+  const [searchMatch, setSearchMatch] = useState<'contains'|'exact'>('contains');
+  const [advancedQuery, setAdvancedQuery] = useState('');
 
   // Load all threads on mount
   useEffect(() => {
@@ -214,28 +218,70 @@ export default function AllInboxesView({ currentUser }: AllInboxesViewProps) {
           </div>
 
           {/* Search input — only on search tab */}
-          {activeTab === 'search' && (
-            <div className="relative mt-3">
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search across all inboxes..."
-                className="input w-full pl-11 pr-10"
-              />
-              <svg className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              {query && (
-                <button
-                  onClick={() => { setQuery(''); setSearchResults([]); setHasSearched(false); }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-analog-text-faint hover:text-analog-text"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    {activeTab === 'search' && (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-analog-text-faint pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search across all inboxes..."
+                    className="input w-full pr-3 py-2"
+                    style={{paddingLeft: '2.25rem'}}
+                  />
+                  {query && (
+                    <button
+                      onClick={() => { setQuery(''); setSearchResults([]); setHasSearched(false); }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-analog-text-faint hover:text-analog-text"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex-shrink-0 ${
+                    showAdvancedSearch
+                      ? 'bg-analog-accent text-white border-analog-accent'
+                      : 'border-analog-border text-analog-text-muted hover:text-analog-text hover:border-analog-accent'
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  Filters
                 </button>
+              </div>
+              {showAdvancedSearch && (
+                <div className="rounded-xl border border-analog-border bg-analog-surface-alt p-3 space-y-2">
+                  <div className="flex gap-1">
+                    {(['contains', 'exact'] as const).map(m => (
+                      <button key={m} onClick={() => setSearchMatch(m)}
+                        className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-medium transition-colors ${searchMatch === m ? 'bg-analog-accent text-white' : 'border border-analog-border text-analog-text-faint hover:text-analog-text'}`}>
+                        {m === 'contains' ? 'Contains' : 'Exact match'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <select value={searchField} onChange={e => setSearchField(e.target.value as any)}
+                      className="input text-xs py-1.5 w-full">
+                      <option value="all">All fields</option>
+                      <option value="from">From</option>
+                      <option value="subject">Subject</option>
+                      <option value="body">Body</option>
+                    </select>
+                    <input type="text" value={advancedQuery} onChange={e => setAdvancedQuery(e.target.value)}
+                      placeholder="Additional filter..."
+                      className="input text-xs py-1.5 flex-1" />
+                  </div>
+                </div>
               )}
             </div>
           )}

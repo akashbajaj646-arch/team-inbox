@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
+import AdvancedSearchPanel, { defaultConfig, hasActiveSearch, type SearchConfig, type SearchFilter, type FilterLogic } from './AdvancedSearchPanel';
 import type { EmailThread, Inbox, FilteredInbox, FilterRule, Contact } from '@/types';
 
 type EmailView = 'all' | 'unread' | 'starred' | 'sent' | 'trash';
@@ -33,9 +34,7 @@ export default function ThreadList({
   const [threadsWithAttachments, setThreadsWithAttachments] = useState<Set<string>>(new Set());
 
   const [showSearch, setShowSearch] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchField, setSearchField] = useState<SearchField>('all');
-  const [searchMatch, setSearchMatch] = useState<SearchMatch>('contains');
+  const [searchConfig, setSearchConfig] = useState<SearchConfig>(defaultConfig());
   const [searching, setSearching] = useState(false);
 
   const supabase = createClient();
@@ -55,12 +54,12 @@ export default function ThreadList({
   }, [inbox.id, filteredInbox?.id, activeView]);
 
   useEffect(() => {
-    if (searchQuery.trim()) {
+    if (hasActiveSearch(searchConfig)) {
       performSearch();
     } else {
       setDisplayedThreads(threads);
     }
-  }, [searchQuery, searchField, searchMatch, threads]);
+  }, [searchConfig, threads]);
 
   async function loadThreadAttachments(threadsList: EmailThread[]) {
     if (threadsList.length === 0) return;
@@ -78,15 +77,15 @@ export default function ThreadList({
   }
 
   async function performSearch() {
-    if (!searchQuery.trim()) { setDisplayedThreads(threads); return; }
+    if (!hasActiveSearch(searchConfig)) { setDisplayedThreads(threads); return; }
     setSearching(true);
-    const query = searchQuery.toLowerCase();
+
     const threadIds = threads.map(t => t.id);
     if (threadIds.length === 0) { setDisplayedThreads([]); setSearching(false); return; }
 
     const { data: messages } = await supabase
       .from('email_messages')
-      .select('thread_id, from_address, from_name, body_text, body_html')
+      .select('thread_id, from_address, from_name, to_addresses, body_text, body_html')
       .in('thread_id', threadIds);
 
     const messagesByThread: Record<string, any[]> = {};
@@ -95,69 +94,33 @@ export default function ThreadList({
       messagesByThread[m.thread_id].push(m);
     });
 
+    function testFilter(thread: any, msgs: any[], filter: any): boolean {
+      const q = filter.query.toLowerCase().trim();
+      if (!q) return true;
+      const test = (str: string) => searchConfig.match === 'exact' ? str.toLowerCase() === q : str.toLowerCase().includes(q);
+      switch (filter.field) {
+        case 'from': return msgs.some(m => test(m.from_address || '') || test(m.from_name || ''));
+        case 'to': return msgs.some(m => (m.to_addresses || []).some((a: string) => test(a)));
+        case 'subject': return test(thread.subject || '');
+        case 'body': return msgs.some(m => test(m.body_text || '') || test(m.body_html || ''));
+        default: return test(thread.subject || '') ||
+          msgs.some(m => test(m.from_address || '') || test(m.from_name || '') || test(m.body_text || ''));
+      }
+    }
+
+    const activeFilters = searchConfig.filters.filter(f => f.query.trim());
     const matchingThreads = threads.filter(thread => {
       const msgs = messagesByThread[thread.id] || [];
-      const subjectMatch = () => searchMatch === 'exact' ? (thread.subject || '').toLowerCase() === query : (thread.subject || '').toLowerCase().includes(query);
-      const fromMatch = () => msgs.some(m => { const f = ((m.from_address || '') + ' ' + (m.from_name || '')).toLowerCase(); return searchMatch === 'exact' ? f === query : f.includes(query); });
-      const bodyMatch = () => msgs.some(m => { const b = ((m.body_text || '') + ' ' + (m.body_html || '')).toLowerCase(); return searchMatch === 'exact' ? b === query : b.includes(query); });
-      switch (searchField) {
-        case 'from': return fromMatch();
-        case 'subject': return subjectMatch();
-        case 'body': return bodyMatch();
-        default: return subjectMatch() || fromMatch() || bodyMatch();
-      }
+      if (searchConfig.logic === 'and') return activeFilters.every(f => testFilter(thread, msgs, f));
+      return activeFilters.some(f => testFilter(thread, msgs, f));
     });
 
     setDisplayedThreads(matchingThreads);
+    loadContactNames(matchingThreads);
     setSearching(false);
   }
 
-  function clearSearch() {
-    setSearchQuery('');
-    setSearchField('all');
-    setSearchMatch('contains');
-    setDisplayedThreads(threads);
-  }
-
-  function matchesFilter(thread: EmailThread, messages: any[], filter: FilterRule): boolean {
-    const value = filter.value.toLowerCase();
-    switch (filter.field) {
-      case 'from':
-        return messages.some(m => {
-          const from = (m.from_address || '').toLowerCase();
-          const fromName = (m.from_name || '').toLowerCase();
-          switch (filter.operator) {
-            case 'contains': return from.includes(value) || fromName.includes(value);
-            case 'equals': return from === value || fromName === value;
-            case 'starts_with': return from.startsWith(value) || fromName.startsWith(value);
-            case 'ends_with': return from.endsWith(value) || fromName.endsWith(value);
-            default: return false;
-          }
-        });
-      case 'subject':
-        const subject = (thread.subject || '').toLowerCase();
-        switch (filter.operator) {
-          case 'contains': return subject.includes(value);
-          case 'equals': return subject === value;
-          case 'starts_with': return subject.startsWith(value);
-          case 'ends_with': return subject.endsWith(value);
-          default: return false;
-        }
-      case 'body':
-        return messages.some(m => {
-          const body = ((m.body_text || '') + (m.body_html || '')).toLowerCase();
-          switch (filter.operator) {
-            case 'contains': return body.includes(value);
-            case 'equals': return body === value;
-            case 'starts_with': return body.startsWith(value);
-            case 'ends_with': return body.endsWith(value);
-            default: return false;
-          }
-        });
-      default: return false;
-    }
-  }
-
+  
   async function loadThreads() {
     setLoading(true);
 
@@ -398,7 +361,7 @@ export default function ThreadList({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowSearch(!showSearch)} className={`p-2 rounded-lg transition-all duration-150 ${showSearch || searchQuery ? 'bg-analog-accent text-white' : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text'}`} title="Search emails">
+          <button onClick={() => setShowSearch(!showSearch)} className={`p-2 rounded-lg transition-all duration-150 ${showSearch || hasActiveSearch(searchConfig) ? 'bg-analog-accent text-white' : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text'}`} title="Search emails">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
           </button>
           <button onClick={handleSync} disabled={syncing || !inbox.google_refresh_token} className="px-4 py-2 text-sm font-medium text-analog-text-muted bg-analog-surface border border-analog-border-strong rounded-lg hover:border-analog-accent hover:text-analog-accent transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -408,36 +371,18 @@ export default function ThreadList({
       </div>
 
       {showSearch && (
-        <div className="px-4 py-3 border-b border-analog-border bg-analog-surface space-y-3">
-          <div className="relative">
-            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search emails..." className="input w-full pr-10" style={{paddingLeft: "2.75rem"}} autoFocus />
-            <svg className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            {searchQuery && <button onClick={clearSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-analog-text-faint hover:text-analog-text"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>}
-          </div>
-          <div className="flex gap-2">
-            <select value={searchField} onChange={(e) => setSearchField(e.target.value as SearchField)} className="input text-sm py-2 flex-1">
-              <option value="all">All fields</option>
-              <option value="from">From</option>
-              <option value="subject">Subject</option>
-              <option value="body">Body</option>
-            </select>
-            <select value={searchMatch} onChange={(e) => setSearchMatch(e.target.value as SearchMatch)} className="input text-sm py-2 flex-1">
-              <option value="contains">Contains</option>
-              <option value="exact">Exact match</option>
-            </select>
-          </div>
-          {searchQuery && (
-            <div className="flex items-center justify-between text-xs text-analog-text-faint">
-              <span>{searching ? 'Searching...' : `${displayedThreads.length} result${displayedThreads.length !== 1 ? 's' : ''}`}</span>
-              <button onClick={clearSearch} className="text-analog-accent hover:underline">Clear search</button>
-            </div>
-          )}
+        <div className="px-4 py-3 border-b border-analog-border bg-analog-surface">
+          <AdvancedSearchPanel
+            config={searchConfig}
+            onChange={setSearchConfig}
+            resultCount={displayedThreads.length}
+            searching={searching}
+          />
         </div>
       )}
-
-      {!showSearch && searchQuery && (
+      {!showSearch && hasActiveSearch(searchConfig) && (
         <div className="px-4 py-2 border-b border-analog-border bg-analog-accent/10 flex items-center justify-between">
-          <span className="text-sm text-analog-accent">Searching: "{searchQuery}" ({displayedThreads.length} results)</span>
+          <span className="text-sm text-analog-accent">{displayedThreads.length} result{displayedThreads.length !== 1 ? 's' : ''}</span>
           <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline">Clear</button>
         </div>
       )}
@@ -457,13 +402,13 @@ export default function ThreadList({
           <div className="p-6 text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-analog-surface flex items-center justify-center">
               <svg className="w-8 h-8 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                {searchQuery ? <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /> : <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />}
+                {<path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />}
               </svg>
             </div>
             <p className="text-analog-text-muted mb-2">
-              {searchQuery ? `No results for "${searchQuery}"` : (<>{activeView === 'all' && 'No emails yet'}{activeView === 'unread' && 'No unread emails'}{activeView === 'starred' && 'No starred emails'}{activeView === 'sent' && 'No sent emails'}{activeView === 'trash' && 'Trash is empty'}</>)}
+              {hasActiveSearch(searchConfig) ? 'No results found' : (<>{activeView === 'all' && 'No emails yet'}{activeView === 'unread' && 'No unread emails'}{activeView === 'starred' && 'No starred emails'}{activeView === 'sent' && 'No sent emails'}{activeView === 'trash' && 'Trash is empty'}</>)}
             </p>
-            {searchQuery ? <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline font-medium">Clear search</button>
+            {hasActiveSearch(searchConfig) ? <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline font-medium">Clear search</button>
               : activeView === 'all' && inbox.google_refresh_token ? <button onClick={handleSync} className="text-sm text-analog-accent hover:underline font-medium">Sync from Gmail</button>
               : activeView === 'all' && !inbox.google_refresh_token ? <a href="/api/auth/google" className="text-sm text-analog-accent hover:underline font-medium">Connect Gmail first</a>
               : null}
