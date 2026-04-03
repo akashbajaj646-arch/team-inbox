@@ -580,7 +580,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
       </div>{/* end main SMS column */}
 
       {/* Right sidebar */}
-      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white overflow-y-auto px-4 py-5">
+      <div className="w-72 flex-shrink-0 bg-analog-surface-alt overflow-y-auto px-4 py-5">
         <CustomerCard phone={thread?.contact_phone || ''} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
       </div>
 

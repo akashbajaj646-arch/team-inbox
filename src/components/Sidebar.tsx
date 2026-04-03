@@ -202,7 +202,7 @@ export default function Sidebar({
             onClick={() => onSelectInbox(inbox.id, null)}
             className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 text-left border ${
               selectedInboxId === inbox.id && !selectedFilteredInboxId
-                ? 'bg-gradient-to-br from-analog-accent to-analog-accent-light text-white border-analog-accent-hover shadow-analog-accent'
+                ? 'bg-[#d8e3fb] text-[#005bc4] border-l-4 border-l-[#005bc4] border-transparent'
                 : 'text-analog-text-muted border-transparent hover:bg-analog-surface-alt hover:border-analog-border'
             }`}
           >
@@ -236,14 +236,14 @@ export default function Sidebar({
   }
 
   return (
-    <div ref={sidebarRef} className="bg-analog-surface border-r-2 border-analog-border-strong flex flex-col h-screen flex-shrink-0 relative" style={{width: 256}}>
+    <div ref={sidebarRef} className="bg-analog-surface flex flex-col h-screen flex-shrink-0 relative" style={{width: 256}}>
       {/* Resize handle */}
       <div
         onMouseDown={startSidebarResize}
         className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10 group"
       />
       {/* Logo */}
-      <div className="p-6 border-b-2 border-analog-border-strong">
+      <div className="p-6 border-b border-analog-border-light">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-analog-accent to-analog-accent-light flex items-center justify-center shadow-analog-accent">
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -259,7 +259,7 @@ export default function Sidebar({
         <button
           onClick={onCompose}
           disabled={!selectedInboxId}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-br from-analog-accent to-analog-accent-light shadow-analog-accent hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-analog-accent hover:bg-analog-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -389,7 +389,7 @@ export default function Sidebar({
       </div>
 
       {/* Inboxes */}
-      <div className="p-4 border-b border-analog-border flex-1 overflow-y-auto space-y-4">
+      <div className="p-4 flex-1 overflow-y-auto space-y-4">
         {loading ? (
           <div className="px-2 py-4 text-center text-analog-text-muted text-sm">Loading...</div>
         ) : (
@@ -480,7 +480,7 @@ export default function Sidebar({
       </div>
 
       {/* User */}
-      <div className="p-4 border-t-2 border-analog-border-strong">
+      <div className="p-4 border-t border-analog-border-light">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-analog-secondary to-analog-secondary-light flex items-center justify-center text-white font-semibold text-sm border-2 border-analog-border">
             {currentUser.name?.charAt(0) || currentUser.email.charAt(0).toUpperCase()}

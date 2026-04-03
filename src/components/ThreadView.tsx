@@ -787,7 +787,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       </div>{/* end main thread column */}
 
       {/* Right sidebar */}
-      <div className="w-72 flex-shrink-0 border-l border-stone-200 bg-white flex flex-col">
+      <div className="w-72 flex-shrink-0 bg-analog-surface-alt flex flex-col">
         <div className="overflow-y-auto px-4 py-5 border-b border-stone-200" style={{maxHeight: '50%'}}>
           <CustomerCard email={senderEmail} onCustomerLinked={(name) => setCustomerLinkedName(name)} />
         </div>

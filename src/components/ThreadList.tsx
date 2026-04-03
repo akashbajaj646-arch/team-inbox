@@ -367,10 +367,10 @@ export default function ThreadList({
   ];
 
   return (
-    <div ref={listRef} className="border-r-2 border-analog-border-strong flex flex-col h-screen bg-analog-surface-alt flex-shrink-0 relative" style={{width: 360}}>
+    <div ref={listRef} className="border-r border-analog-border-light flex flex-col h-screen bg-analog-surface-alt flex-shrink-0 relative" style={{width: 360}}>
       <div onMouseDown={startListResize} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10" />
 
-      <div className="px-6 py-5 border-b-2 border-analog-border-strong bg-analog-surface flex items-center justify-between">
+      <div className="px-6 py-5 border-b border-analog-border-light bg-analog-surface flex items-center justify-between">
         <div>
           <h2 className="font-display text-lg font-medium text-analog-text">{filteredInbox ? filteredInbox.name : 'Emails'}</h2>
           {filteredInbox && (
@@ -457,7 +457,7 @@ export default function ThreadList({
               <div
                 key={thread.id}
                 onClick={() => { onSelectThread(thread.id); if (!thread.is_read && onThreadRead) onThreadRead(thread.id); }}
-                className={`relative group cursor-pointer transition-all duration-150 ${selectedThreadId === thread.id ? 'bg-analog-surface border-l-4 border-l-analog-accent border-y border-y-analog-border-strong' : 'border-b border-analog-border hover:bg-analog-surface'}`}
+                className={`relative group cursor-pointer transition-all duration-150 ${selectedThreadId === thread.id ? 'bg-white shadow-[0_1px_4px_rgba(42,52,57,0.07)] border-l-4 border-l-analog-accent rounded-lg mx-2 mb-1' : 'bg-white rounded-lg mx-2 mb-1 hover:shadow-[0_1px_4px_rgba(42,52,57,0.07)] transition-shadow'}`}
               >
                 <div className="px-6 py-5">
                   <div className="flex items-start gap-3">
