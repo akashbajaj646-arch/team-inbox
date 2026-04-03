@@ -121,6 +121,46 @@ export default function ThreadList({
   }
 
   
+  function matchesFilter(thread: any, messages: any[], filter: any): boolean {
+    const value = (filter.value || '').toLowerCase();
+    switch (filter.field) {
+      case 'from':
+        return messages.some(m => {
+          const from = (m.from_address || '').toLowerCase();
+          const fromName = (m.from_name || '').toLowerCase();
+          switch (filter.operator) {
+            case 'contains': return from.includes(value) || fromName.includes(value);
+            case 'equals': return from === value || fromName === value;
+            case 'starts_with': return from.startsWith(value) || fromName.startsWith(value);
+            case 'ends_with': return from.endsWith(value) || fromName.endsWith(value);
+            default: return false;
+          }
+        });
+      case 'subject': {
+        const subject = (thread.subject || '').toLowerCase();
+        switch (filter.operator) {
+          case 'contains': return subject.includes(value);
+          case 'equals': return subject === value;
+          case 'starts_with': return subject.startsWith(value);
+          case 'ends_with': return subject.endsWith(value);
+          default: return false;
+        }
+      }
+      case 'body':
+        return messages.some(m => {
+          const body = ((m.body_text || '') + ' ' + (m.body_html || '')).toLowerCase();
+          switch (filter.operator) {
+            case 'contains': return body.includes(value);
+            case 'equals': return body === value;
+            case 'starts_with': return body.startsWith(value);
+            case 'ends_with': return body.endsWith(value);
+            default: return false;
+          }
+        });
+      default: return false;
+    }
+  }
+
   async function loadThreads() {
     setLoading(true);
 
