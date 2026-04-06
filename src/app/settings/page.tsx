@@ -10,6 +10,7 @@ import TeamMembers from '@/components/TeamMembers';
 import FilteredInboxManager from '@/components/FilteredInboxManager';
 import TwilioSettings from '@/components/TwilioSettings';
 import ContactsManager from '@/components/ContactsManager';
+import SignatureEditor from '@/components/SignatureEditor';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ function SettingsContent() {
   const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [userRoles, setUserRoles] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'inboxes' | 'team' | 'sms' | 'contacts'>('inboxes');
+  const [activeTab, setActiveTab] = useState<'inboxes' | 'team' | 'sms' | 'contacts' | 'profile'>('inboxes');
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
@@ -154,12 +155,26 @@ function SettingsContent() {
                 Team Members
               </button>
             )}
+            <button
+              onClick={() => setActiveTab('profile')}
+              className={`py-4 border-b-2 font-medium transition-all duration-150 ${
+                activeTab === 'profile'
+                  ? 'border-analog-accent text-analog-accent'
+                  : 'border-transparent text-analog-text-muted hover:text-analog-text'
+              }`}
+            >
+              My Profile
+            </button>
           </div>
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-8">
-        {activeTab === 'contacts' ? (
+        {activeTab === 'profile' ? (
+          <div className="max-w-2xl">
+            <SignatureEditor currentUser={currentUser} />
+          </div>
+        ) : activeTab === 'contacts' ? (
           <ContactsManager currentUser={currentUser} />
         ) : activeTab === 'sms' ? (
           <div className="max-w-xl">

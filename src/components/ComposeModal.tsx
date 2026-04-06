@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { Inbox, User } from '@/types';
 import TemplatePicker from './TemplatePicker';
 
@@ -30,6 +30,30 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const [fontSize, setFontSize] = useState('3');
 
   const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isEmail) return;
+    async function loadSignature() {
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('inbox_users')
+        .select('email_signature')
+        .eq('id', currentUser.id)
+        .single();
+      if (data?.email_signature && editorRef.current) {
+        editorRef.current.innerHTML = `<p><br></p><p>--</p>${data.email_signature}`;
+        // Place cursor at top
+        const range = document.createRange();
+        const sel = window.getSelection();
+        range.setStart(editorRef.current, 0);
+        range.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }
+    loadSignature();
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const smsFileInputRef = useRef<HTMLInputElement>(null);
 

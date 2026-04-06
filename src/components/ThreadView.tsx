@@ -85,6 +85,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [bccField, setBccField] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
+  const [userSignature, setUserSignature] = useState<string | null>(null);
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
   const [messageAttachments, setMessageAttachments] = useState<Record<string, any[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +94,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   useEffect(() => {
     loadThread();
     updatePresence('viewing');
+    loadSignature();
 
     const messageChannel = supabase
       .channel(`messages:${threadId}`)
@@ -140,6 +142,18 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       updatePresence('viewing');
     }
   }, [showComposer, replyBody]);
+
+  async function loadSignature() {
+    const { data } = await supabase
+      .from('inbox_users')
+      .select('email_signature')
+      .eq('id', currentUser.id)
+      .single();
+    if (data?.email_signature) {
+      setUserSignature(data.email_signature);
+      setReplyBody(`<p><br></p><p>--</p>${data.email_signature}`);
+    }
+  }
 
   async function loadThread() {
     setLoading(true);
