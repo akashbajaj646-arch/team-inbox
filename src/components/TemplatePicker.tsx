@@ -14,7 +14,9 @@ export default function TemplatePicker({ inboxId, onSelect }: TemplatePickerProp
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [openUpward, setOpenUpward] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const supabase = createClient();
 
   useEffect(() => {
@@ -73,7 +75,14 @@ export default function TemplatePicker({ inboxId, onSelect }: TemplatePickerProp
     <div className="relative" ref={dropdownRef}>
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        ref={buttonRef}
+        onClick={() => {
+          if (!isOpen && buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setOpenUpward(rect.top > 320);
+          }
+          setIsOpen(!isOpen);
+        }}
         className="btn btn-secondary text-sm"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
