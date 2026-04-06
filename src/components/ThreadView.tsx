@@ -421,6 +421,42 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setActiveActionMenu(null);
   }
 
+  async function handleReportSpam(messageId: string) {
+    if (!confirm('Report this email as spam? It will be removed from your inbox.')) return;
+    setActiveActionMenu(null);
+    const res = await fetch('/api/emails/spam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, action: 'spam' }),
+    });
+    if (res.ok) loadThread();
+    else alert('Failed to report spam.');
+  }
+
+  async function handleUnsubscribe(messageId: string, bodyHtml: string) {
+    setActiveActionMenu(null);
+    const res = await fetch('/api/emails/spam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, action: 'unsubscribe' }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(`Unsubscribed successfully (${data.method === 'mailto' ? 'email sent' : 'link triggered'}).`);
+    } else {
+      // Fall back: scan body for unsubscribe link
+      const match = bodyHtml?.match(/href=["'](https?:\/\/[^"']*unsubscri[^"']*)/i);
+      if (match) {
+        window.open(match[1], '_blank');
+      } else {
+        // No unsubscribe found — report as spam instead
+        if (confirm('No unsubscribe option found. Report this email as spam instead?')) {
+          await handleReportSpam(messageId);
+        }
+      }
+    }
+  }
+
   function formatFileSize(bytes: number): string {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -603,7 +639,11 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                           { label: "Mark Unread", fn: () => handleMarkUnread(message.id) },
                           { label: "Print", fn: () => handlePrintMessage(message) },
                           { label: "Delete", fn: () => handleDeleteMessage(message.id), danger: true },
-                        ].map(({ label, fn, danger }) => (
+                          ...(!message.is_outbound ? [
+                            { label: "Report Spam", fn: () => handleReportSpam(message.id), danger: true },
+                            { label: "Unsubscribe", fn: () => handleUnsubscribe(message.id, message.body_html || "") },
+                          ] : []),
+                        ].map(({ label, fn, danger }: any) => (
                           <button
                             key={label}
                             onClick={fn}

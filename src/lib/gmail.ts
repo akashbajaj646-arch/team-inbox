@@ -390,3 +390,47 @@ export async function getAttachment(
   });
   return response.data.data || '';
 }
+
+// Report message as spam
+export async function reportSpam(refreshToken: string, gmailMessageId: string) {
+  const gmail = createGmailClient(refreshToken);
+  await gmail.users.messages.modify({
+    userId: 'me',
+    id: gmailMessageId,
+    requestBody: {
+      addLabelIds: ['SPAM'],
+      removeLabelIds: ['INBOX'],
+    },
+  });
+}
+
+// Get List-Unsubscribe header from a message
+export async function getUnsubscribeInfo(refreshToken: string, gmailMessageId: string): Promise<{ mailto: string | null; http: string | null }> {
+  const gmail = createGmailClient(refreshToken);
+  const msg = await gmail.users.messages.get({ userId: 'me', id: gmailMessageId, format: 'metadata', metadataHeaders: ['List-Unsubscribe'] });
+  const header = msg.data.payload?.headers?.find((h: any) => h.name.toLowerCase() === 'list-unsubscribe')?.value || '';
+  const mailtoMatch = header.match(/<mailto:([^>]+)>/i);
+  const httpMatch = header.match(/<(https?:\/\/[^>]+)>/i);
+  return {
+    mailto: mailtoMatch?.[1] || null,
+    http: httpMatch?.[1] || null,
+  };
+}
+
+// Send unsubscribe via mailto
+export async function sendUnsubscribeEmail(refreshToken: string, mailtoAddress: string, fromEmail: string) {
+  const gmail = createGmailClient(refreshToken);
+  const lines = [
+    `To: ${mailtoAddress}`,
+    `From: ${fromEmail}`,
+    `Subject: Unsubscribe`,
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    'Unsubscribe',
+  ];
+  const email = lines.join('\r\n');
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw: Buffer.from(email).toString('base64url') },
+  });
+}
