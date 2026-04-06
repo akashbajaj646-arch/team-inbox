@@ -11,6 +11,7 @@ import FilteredInboxManager from '@/components/FilteredInboxManager';
 import TwilioSettings from '@/components/TwilioSettings';
 import ContactsManager from '@/components/ContactsManager';
 import SignatureEditor from '@/components/SignatureEditor';
+import CompanySettings from '@/components/CompanySettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -171,7 +172,8 @@ function SettingsContent() {
 
       <div className="max-w-5xl mx-auto px-6 py-8">
         {activeTab === 'profile' ? (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl space-y-8">
+            <CompanySettings />
             <SignatureEditor currentUser={currentUser} />
           </div>
         ) : activeTab === 'contacts' ? (

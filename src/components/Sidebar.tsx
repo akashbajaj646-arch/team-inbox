@@ -34,6 +34,7 @@ export default function Sidebar({
   onCompose,
 }: SidebarProps) {
   const [inboxes, setInboxes] = useState<InboxWithFilters[]>([]);
+  const [companyName, setCompanyName] = useState('Team Inbox');
   const [expandedInboxes, setExpandedInboxes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [mentions, setMentions] = useState<any[]>([]);
@@ -43,6 +44,9 @@ export default function Sidebar({
 
   useEffect(() => {
     loadInboxes();
+    supabase.from('org_settings').select('company_name').single().then(({ data }) => {
+      if (data?.company_name) setCompanyName(data.company_name);
+    });
     loadMentions();
 
     const interval = setInterval(loadMentions, 30000);
@@ -250,7 +254,7 @@ export default function Sidebar({
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           </div>
-          <span className="font-display text-xl font-medium text-analog-text">Team Inbox</span>
+          <span className="font-display text-xl font-medium text-analog-text">{companyName}</span>
         </div>
       </div>
 
