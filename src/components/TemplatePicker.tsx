@@ -84,7 +84,7 @@ export default function TemplatePicker({ inboxId, onSelect }: TemplatePickerProp
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full left-0 mb-2 w-80 bg-analog-surface border-2 border-analog-border-strong rounded-xl shadow-analog-lg z-50 overflow-hidden">
+        <div className="absolute bottom-full left-0 mb-2 w-96 bg-analog-surface border-2 border-analog-border-strong rounded-xl shadow-analog-lg z-[999] overflow-hidden">
           {/* Search */}
           <div className="p-3 border-b-2 border-analog-border-strong">
             <input
@@ -98,7 +98,7 @@ export default function TemplatePicker({ inboxId, onSelect }: TemplatePickerProp
           </div>
 
           {/* Templates List */}
-          <div className="max-h-64 overflow-y-auto p-2">
+          <div className="max-h-96 overflow-y-auto p-2">
             {filteredTemplates.length === 0 ? (
               <div className="text-center py-6 text-analog-text-muted text-sm">
                 No templates found
@@ -116,7 +116,7 @@ export default function TemplatePicker({ inboxId, onSelect }: TemplatePickerProp
                       className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-analog-hover transition-all duration-150"
                     >
                       <p className="font-medium text-sm text-analog-text">{template.name}</p>
-                      <p className="text-xs text-analog-text-faint line-clamp-1 mt-0.5">
+                      <p className="text-xs text-analog-text-faint line-clamp-2 mt-0.5">
                         {template.body}
                       </p>
                     </button>
