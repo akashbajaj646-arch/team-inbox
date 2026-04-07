@@ -5,6 +5,7 @@ const nextConfig = {
       bodySizeLimit: '2mb',
     },
   },
+  serverExternalPackages: ['twilio'],
 };
 
 module.exports = nextConfig;

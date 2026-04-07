@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
-const twilio = require('twilio');
+import twilio from 'twilio';
 
 export const dynamic = 'force-dynamic';
 
