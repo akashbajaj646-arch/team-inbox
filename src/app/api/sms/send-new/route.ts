@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
-import twilio from 'twilio';
+const twilio = require('twilio');
 
 /**
  * Send a new SMS or WhatsApp message to a phone number (creates a new thread).

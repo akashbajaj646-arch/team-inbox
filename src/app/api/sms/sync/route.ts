@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
-import twilio from 'twilio';
+const twilio = require('twilio');
 
 export async function POST(request: Request) {
   try {
