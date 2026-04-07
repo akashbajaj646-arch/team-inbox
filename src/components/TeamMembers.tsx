@@ -22,6 +22,7 @@ export default function TeamMembers({ currentUser, isAdmin }: TeamMembersProps) 
   const [userMemberships, setUserMemberships] = useState<InboxMembership[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resetSending, setResetSending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const supabase = createClient();
@@ -178,6 +179,23 @@ export default function TeamMembers({ currentUser, isAdmin }: TeamMembersProps) 
     setSaving(false);
   }
 
+  async function handleSendPasswordReset(user: User) {
+    if (!confirm(`Send a password reset email to ${user.email}?`)) return;
+    setResetSending(user.id);
+    setError(null);
+    setSuccess(null);
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const res = await fetch('/api/admin/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: user.email }),
+    });
+    const data = await res.json();
+    setResetSending(null);
+    if (res.ok) setSuccess(`Password reset email sent to ${user.email}.`);
+    else setError(data.error || 'Failed to send reset email.');
+  }
+
   if (!isAdmin) {
     return null;
   }
@@ -239,12 +257,21 @@ export default function TeamMembers({ currentUser, isAdmin }: TeamMembersProps) 
                   <div className="avatar avatar-lg avatar-blue font-display">
                     {(selectedUser.name || selectedUser.email).charAt(0).toUpperCase()}
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className="font-display text-lg font-medium text-analog-text">
                       {selectedUser.name || selectedUser.email.split('@')[0]}
                     </p>
                     <p className="text-sm text-analog-text-muted">{selectedUser.email}</p>
                   </div>
+                  {selectedUser.id !== currentUser.id && (
+                    <button
+                      onClick={() => handleSendPasswordReset(selectedUser)}
+                      disabled={resetSending === selectedUser.id}
+                      className="btn btn-secondary text-sm disabled:opacity-50"
+                    >
+                      {resetSending === selectedUser.id ? 'Sending...' : 'Send Password Reset'}
+                    </button>
+                  )}
                 </div>
 
                 {error && (

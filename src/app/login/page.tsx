@@ -11,6 +11,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -46,6 +48,22 @@ export default function LoginPage() {
     }
 
     setLoading(false);
+  }
+
+  async function handleForgotPassword() {
+    if (!email.trim()) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    setForgotLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/api/auth/callback?next=/reset-password`,
+    });
+    setForgotLoading(false);
+    if (error) setError(error.message);
+    else setMessage('Password reset email sent. Check your inbox.');
+    setShowForgot(false);
   }
 
   return (
@@ -109,6 +127,19 @@ export default function LoginPage() {
                 minLength={6}
               />
             </div>
+
+            {!isSignUp && (
+              <div className="text-right -mt-2">
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={forgotLoading}
+                  className="text-sm text-analog-accent hover:underline"
+                >
+                  {forgotLoading ? 'Sending...' : 'Forgot password?'}
+                </button>
+              </div>
+            )}
 
             <button
               type="submit"
