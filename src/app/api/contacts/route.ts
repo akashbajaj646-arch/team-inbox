@@ -63,7 +63,6 @@ export async function GET(request: Request) {
     const { data: contacts, error } = await supabase
       .from('inbox_contacts')
       .select('*')
-      .eq('user_id', user.id)
       .order('company_name', { ascending: true, nullsFirst: false })
       .order('last_name', { ascending: true, nullsFirst: false });
 
