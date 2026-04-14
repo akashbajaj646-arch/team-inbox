@@ -7,87 +7,65 @@ export async function GET(request: Request) {
     const email = searchParams.get('email');
     const phone = searchParams.get('phone');
     const search = searchParams.get('search');
+    const pageParam = parseInt(searchParams.get('page') || '1');
+    const pageSize = 50;
 
     const supabase = await createClient();
-
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // Find contact by email
     if (email) {
       const { data: contact } = await supabase
-        .rpc('find_contact_by_email', { 
-          search_email: email, 
-          search_user_id: user.id 
-        })
+        .rpc('find_contact_by_email', { search_email: email, search_user_id: user.id })
         .single();
-
       return NextResponse.json({ contact: contact || null });
     }
 
     // Find contact by phone
     if (phone) {
       const { data: contact } = await supabase
-        .rpc('find_contact_by_phone', { 
-          search_phone: phone, 
-          search_user_id: user.id 
-        })
+        .rpc('find_contact_by_phone', { search_phone: phone, search_user_id: user.id })
         .single();
-
       return NextResponse.json({ contact: contact || null });
     }
 
-    // Search contacts
-    if (search) {
-      const searchLower = `%${search.toLowerCase()}%`;
-      const { data: contacts, error } = await supabase
-        .from('inbox_contacts')
-        .select('*')
-        .or(`first_name.ilike.${searchLower},last_name.ilike.${searchLower},company_name.ilike.${searchLower},email_1.ilike.${searchLower},email_2.ilike.${searchLower},email_3.ilike.${searchLower},phone_number.ilike.${searchLower}`)
-        .order('company_name', { ascending: true, nullsFirst: false })
-        .order('last_name', { ascending: true, nullsFirst: false })
-        .limit(50);
-
-      if (error) {
-        console.error('Search error:', error);
-        return NextResponse.json({ error: 'Search failed' }, { status: 500 });
-      }
-
-      return NextResponse.json({ 
-      contacts,
-      total: count || 0,
-      page: pageParam,
-      pageSize,
-      totalPages: Math.ceil((count || 0) / pageSize),
-    });
-    }
-
-    // Server-side pagination
-    const pageParam = parseInt(searchParams.get('page') || '1');
-    const pageSize = 50;
     const from = (pageParam - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    const { data: contacts, error, count } = await supabase
+    let query = supabase
       .from('inbox_contacts')
       .select('*', { count: 'exact' })
       .order('company_name', { ascending: true, nullsFirst: false })
       .order('last_name', { ascending: true, nullsFirst: false })
       .range(from, to);
 
+    // Search filter
+    if (search) {
+      const s = `%${search.toLowerCase()}%`;
+      query = query.or(`first_name.ilike.${s},last_name.ilike.${s},company_name.ilike.${s},email_1.ilike.${s},phone_number.ilike.${s}`);
+    }
+
+    const { data: contacts, error, count } = await query;
+
     if (error) {
       console.error('Contacts fetch error:', error);
       return NextResponse.json({ error: 'Failed to fetch contacts' }, { status: 500 });
     }
 
-    return NextResponse.json({ contacts });
+    return NextResponse.json({
+      contacts,
+      total: count || 0,
+      page: pageParam,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize),
+    });
   } catch (err) {
     console.error('Contacts error:', err);
     return NextResponse.json({ error: 'Failed to fetch contacts' }, { status: 500 });
   }
 }
+
 
 export async function POST(request: Request) {
   try {
