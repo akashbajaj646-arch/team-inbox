@@ -18,6 +18,8 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [syncingHQ, setSyncingHQ] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
@@ -47,6 +49,25 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
     }
     
     setLoading(false);
+  }
+
+  async function handleSyncAdvanceHQ() {
+    setSyncingHQ(true);
+    setSyncResult(null);
+    setError(null);
+    try {
+      const res = await fetch('/api/contacts/sync-advance-hq', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncResult(data.message || `Synced ${data.synced} contacts`);
+        loadContacts();
+      } else {
+        setError(data.error || 'Sync failed');
+      }
+    } catch (err) {
+      setError('Sync failed');
+    }
+    setSyncingHQ(false);
   }
 
   async function handleSearch(query: string) {
@@ -521,6 +542,23 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
           </form>
         </div>
       )}
+
+      {/* Sync from Advance HQ */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          {syncResult && <p className="text-sm text-analog-success">{syncResult}</p>}
+        </div>
+        <button
+          onClick={handleSyncAdvanceHQ}
+          disabled={syncingHQ}
+          className="btn btn-secondary text-sm flex items-center gap-2 disabled:opacity-50"
+        >
+          <svg className={`w-4 h-4 ${syncingHQ ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {syncingHQ ? 'Syncing...' : 'Sync from Advance HQ'}
+        </button>
+      </div>
 
       {/* Search */}
       <div className="relative">
