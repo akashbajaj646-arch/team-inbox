@@ -18,6 +18,9 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalContacts, setTotalContacts] = useState(0);
   const [syncingHQ, setSyncingHQ] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -35,19 +38,22 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
   });
 
   useEffect(() => {
-    loadContacts();
+    loadContacts(1);
   }, []);
 
-  async function loadContacts() {
+  async function loadContacts(page = 1, query = '') {
     setLoading(true);
-    
-    const response = await fetch('/api/contacts');
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    if (query.trim()) params.set('search', query.trim());
+    const response = await fetch(`/api/contacts?${params}`);
     const data = await response.json();
-    
     if (data.contacts) {
       setContacts(data.contacts);
+      setTotalPages(data.totalPages || 1);
+      setTotalContacts(data.total || 0);
+      setCurrentPage(page);
     }
-    
     setLoading(false);
   }
 
@@ -72,18 +78,8 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
 
   async function handleSearch(query: string) {
     setSearchQuery(query);
-    
-    if (!query.trim()) {
-      loadContacts();
-      return;
-    }
-
-    const response = await fetch(`/api/contacts?search=${encodeURIComponent(query)}`);
-    const data = await response.json();
-    
-    if (data.contacts) {
-      setContacts(data.contacts);
-    }
+    setCurrentPage(1);
+    loadContacts(1, query);
   }
 
   function resetForm() {
@@ -574,6 +570,13 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
         </svg>
       </div>
 
+      {/* Search + count */}
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm text-analog-text-faint">
+          {totalContacts.toLocaleString()} contacts{searchQuery ? ` matching "${searchQuery}"` : ''}
+        </p>
+      </div>
+
       {/* Contacts List */}
       <div className="bg-analog-surface border-2 border-analog-border-strong rounded-xl overflow-hidden">
         {loading ? (
@@ -673,6 +676,28 @@ export default function ContactsManager({ currentUser }: ContactsManagerProps) {
         <p className="text-sm text-analog-text-faint text-center">
           {contacts.length} contact{contacts.length !== 1 ? 's' : ''}
         </p>
+      )}
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <button
+            onClick={() => loadContacts(currentPage - 1, searchQuery)}
+            disabled={currentPage === 1 || loading}
+            className="btn btn-secondary text-sm disabled:opacity-40"
+          >
+            ← Previous
+          </button>
+          <span className="text-sm text-analog-text-faint">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            onClick={() => loadContacts(currentPage + 1, searchQuery)}
+            disabled={currentPage === totalPages || loading}
+            className="btn btn-secondary text-sm disabled:opacity-40"
+          >
+            Next →
+          </button>
+        </div>
       )}
     </div>
   );

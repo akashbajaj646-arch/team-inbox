@@ -45,7 +45,6 @@ export async function GET(request: Request) {
       const { data: contacts, error } = await supabase
         .from('inbox_contacts')
         .select('*')
-        .eq('user_id', user.id)
         .or(`first_name.ilike.${searchLower},last_name.ilike.${searchLower},company_name.ilike.${searchLower},email_1.ilike.${searchLower},email_2.ilike.${searchLower},email_3.ilike.${searchLower},phone_number.ilike.${searchLower}`)
         .order('company_name', { ascending: true, nullsFirst: false })
         .order('last_name', { ascending: true, nullsFirst: false })
@@ -56,29 +55,27 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Search failed' }, { status: 500 });
       }
 
-      return NextResponse.json({ contacts });
+      return NextResponse.json({ 
+      contacts,
+      total: count || 0,
+      page: pageParam,
+      pageSize,
+      totalPages: Math.ceil((count || 0) / pageSize),
+    });
     }
 
-    // Get all contacts with pagination
-    let allContacts: any[] = [];
-    let fetchError = null;
-    let page = 0;
-    const pageSize = 1000;
-    while (true) {
-      const { data, error: pageError } = await supabase
-        .from('inbox_contacts')
-        .select('*')
-        .order('company_name', { ascending: true, nullsFirst: false })
-        .order('last_name', { ascending: true, nullsFirst: false })
-        .range(page * pageSize, (page + 1) * pageSize - 1);
-      if (pageError) { fetchError = pageError; break; }
-      if (!data || data.length === 0) break;
-      allContacts = allContacts.concat(data);
-      if (data.length < pageSize) break;
-      page++;
-    }
-    const contacts = allContacts;
-    const error = fetchError;
+    // Server-side pagination
+    const pageParam = parseInt(searchParams.get('page') || '1');
+    const pageSize = 50;
+    const from = (pageParam - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data: contacts, error, count } = await supabase
+      .from('inbox_contacts')
+      .select('*', { count: 'exact' })
+      .order('company_name', { ascending: true, nullsFirst: false })
+      .order('last_name', { ascending: true, nullsFirst: false })
+      .range(from, to);
 
     if (error) {
       console.error('Contacts fetch error:', error);
