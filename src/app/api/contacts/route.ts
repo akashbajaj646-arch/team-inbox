@@ -60,7 +60,8 @@ export async function GET(request: Request) {
     }
 
     // Get all contacts with pagination
-    let contacts: any[] = [];
+    let allContacts: any[] = [];
+    let fetchError = null;
     let page = 0;
     const pageSize = 1000;
     while (true) {
@@ -70,13 +71,14 @@ export async function GET(request: Request) {
         .order('company_name', { ascending: true, nullsFirst: false })
         .order('last_name', { ascending: true, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
-      if (pageError) { error = pageError; break; }
+      if (pageError) { fetchError = pageError; break; }
       if (!data || data.length === 0) break;
-      contacts = contacts.concat(data);
+      allContacts = allContacts.concat(data);
       if (data.length < pageSize) break;
       page++;
     }
-    const error = null;
+    const contacts = allContacts;
+    const error = fetchError;
 
     if (error) {
       console.error('Contacts fetch error:', error);
