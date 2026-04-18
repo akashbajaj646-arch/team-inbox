@@ -10,6 +10,7 @@ import TeamMembers from '@/components/TeamMembers';
 import FilteredInboxManager from '@/components/FilteredInboxManager';
 import TwilioSettings from '@/components/TwilioSettings';
 import ContactsManager from '@/components/ContactsManager';
+import SegmentsManager from '@/components/SegmentsManager';
 import SignatureEditor from '@/components/SignatureEditor';
 import CompanySettings from '@/components/CompanySettings';
 
@@ -21,7 +22,7 @@ function SettingsContent() {
   const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [userRoles, setUserRoles] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'inboxes' | 'team' | 'sms' | 'contacts' | 'profile'>('inboxes');
+  const [activeTab, setActiveTab] = useState<'inboxes' | 'team' | 'sms' | 'contacts' | 'segments' | 'profile'>('inboxes');
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
@@ -135,6 +136,16 @@ function SettingsContent() {
               Contacts
             </button>
             <button
+              onClick={() => setActiveTab('segments')}
+              className={`py-4 border-b-2 font-medium transition-all duration-150 ${
+                activeTab === 'segments'
+                  ? 'border-analog-accent text-analog-accent'
+                  : 'border-transparent text-analog-text-muted hover:text-analog-text'
+              }`}
+            >
+              Segments
+            </button>
+            <button
               onClick={() => setActiveTab('sms')}
               className={`py-4 border-b-2 font-medium transition-all duration-150 ${
                 activeTab === 'sms'
@@ -171,7 +182,9 @@ function SettingsContent() {
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-8">
-        {activeTab === 'profile' ? (
+        {activeTab === 'segments' ? (
+          <SegmentsManager />
+        ) : activeTab === 'profile' ? (
           <div className="max-w-2xl space-y-8">
             <CompanySettings />
             <SignatureEditor currentUser={currentUser} />
