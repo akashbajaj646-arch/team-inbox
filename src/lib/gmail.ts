@@ -434,3 +434,27 @@ export async function sendUnsubscribeEmail(refreshToken: string, mailtoAddress: 
     requestBody: { raw: Buffer.from(email).toString('base64url') },
   });
 }
+
+// Send a new email (not a reply) - used for broadcasts
+export async function sendNewEmail(
+  refreshToken: string,
+  options: { to: string; subject: string; body: string; cc?: string; bcc?: string }
+) {
+  const gmail = createGmailClient(refreshToken);
+  const lines = [
+    `To: ${options.to}`,
+    options.cc ? `Cc: ${options.cc}` : '',
+    options.bcc ? `Bcc: ${options.bcc}` : '',
+    `Subject: ${options.subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    options.body,
+  ].filter(Boolean);
+  const email = lines.join('\r\n');
+  const response = await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw: Buffer.from(email).toString('base64url') },
+  });
+  return response.data;
+}
