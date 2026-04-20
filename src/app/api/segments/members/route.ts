@@ -5,7 +5,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-  const { filters } = await request.json();
+  const { filters, channel } = await request.json();
+  const isSMS = channel === 'sms';
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -13,8 +14,13 @@ export async function POST(request: Request) {
   function buildQuery() {
     let q = supabase
       .from('inbox_contacts')
-      .select('id, company_name, first_name, last_name, email_1, phone_number, city, state, total_spend, total_invoices, last_invoice_date, categories_purchased')
-      .not('email_1', 'is', null);
+      .select('id, company_name, first_name, last_name, email_1, phone_number, city, state, total_spend, total_invoices, last_invoice_date, categories_purchased, sms_opted_out');
+    
+    if (isSMS) {
+      q = q.not('phone_number', 'is', null).neq('phone_number', '').eq('sms_opted_out', false);
+    } else {
+      q = q.not('email_1', 'is', null);
+    }
 
     for (const f of filters || []) {
       const { field, operator, value, value2 } = f;

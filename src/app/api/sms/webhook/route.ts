@@ -49,6 +49,29 @@ export async function POST(request: Request) {
       );
     }
 
+    // Handle SMS opt-out keywords (A2P 10DLC compliance)
+    const bodyTrimmed = (body || '').trim().toUpperCase();
+    const optOutKeywords = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'];
+    const optInKeywords = ['START', 'UNSTOP', 'YES'];
+
+    if (optOutKeywords.includes(bodyTrimmed)) {
+      // Mark contact as opted out
+      const phoneDigits = from.replace(/\D/g, '');
+      await supabase
+        .from('inbox_contacts')
+        .update({ sms_opted_out: true, sms_opted_out_at: new Date().toISOString() })
+        .or(`phone_number.eq.${from},phone_number.ilike.%${phoneDigits}%`);
+      console.log(`SMS opt-out: ${from}`);
+    } else if (optInKeywords.includes(bodyTrimmed)) {
+      // Re-opt-in
+      const phoneDigits = from.replace(/\D/g, '');
+      await supabase
+        .from('inbox_contacts')
+        .update({ sms_opted_out: false, sms_opted_out_at: null })
+        .or(`phone_number.eq.${from},phone_number.ilike.%${phoneDigits}%`);
+      console.log(`SMS opt-in: ${from}`);
+    }
+
     // Find or create thread for this contact
     const { data: threads } = await supabase
       .from('sms_threads')
