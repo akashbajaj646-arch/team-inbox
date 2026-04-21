@@ -715,6 +715,45 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
         {/* Composer */}
         <div className="border-t border-analog-border-light bg-analog-surface px-8 py-5">
+          {/* Front-style presence indicator near composer */}
+          {(drafting.length > 0 || viewing.length > 0) && (
+            <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="flex -space-x-1.5">
+                {[...drafting, ...viewing.filter(v => !drafting.find(d => d.user_id === v.user_id))].slice(0, 3).map((p: any) => (
+                  <div
+                    key={p.user_id}
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold border-2 border-amber-50 ${getBubbleColor(p.user_id)}`}
+                    title={p.user?.name || p.user?.email}
+                  >
+                    {getInitials(p.user?.name, p.user?.email || '')}
+                  </div>
+                ))}
+              </div>
+              <span className="text-xs font-medium text-amber-900">
+                {drafting.length > 0 ? (
+                  <>
+                    {drafting.length === 1
+                      ? `${drafting[0].user?.name?.split(' ')[0] || drafting[0].user?.email?.split('@')[0]} is drafting a reply...`
+                      : `${drafting.length} people are drafting replies...`}
+                  </>
+                ) : (
+                  <>
+                    {viewing.length === 1
+                      ? `${viewing[0].user?.name?.split(' ')[0] || viewing[0].user?.email?.split('@')[0]} is viewing this thread`
+                      : `${viewing.length} people are viewing this thread`}
+                  </>
+                )}
+              </span>
+              {drafting.length > 0 && (
+                <span className="flex gap-0.5 ml-auto">
+                  <span className="w-1.5 h-1.5 bg-amber-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 bg-amber-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 bg-amber-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </span>
+              )}
+            </div>
+          )}
+
           {!showComposer ? (
             <div className="flex items-center gap-3">
               <button
