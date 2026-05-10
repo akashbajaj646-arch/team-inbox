@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { Inbox, User } from '@/types';
 import TemplatePicker from './TemplatePicker';
 import { MAX_EMAIL_FILES, MAX_EMAIL_TOTAL_BYTES, validateEmailAttachments, formatFileSize, getTotalSize, MAX_SMS_FILES, MAX_WHATSAPP_FILES, validateSmsAttachments, isRiskyFile } from '@/lib/attachments';
+import { useAutoSave } from '@/lib/use-autosave';
 import { extractInlineImages, attachImageResizer, attachImagePasteHandler, MAX_INLINE_IMAGES, type InlineImage } from '@/lib/inline-images';
 
 interface ComposeModalProps {
@@ -27,6 +28,8 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const inlineRegistryRef = useRef<Map<string, InlineImage>>(new Map());
   const [inlineCount, setInlineCount] = useState(0);
   const [smsMedia, setSmsMedia] = useState<File[]>([]);
@@ -34,6 +37,55 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const [fontSize, setFontSize] = useState('3');
 
   const editorRef = useRef<HTMLDivElement>(null);
+
+  // Resume draft from sessionStorage if present
+  useEffect(() => {
+    if (!isEmail) return;
+    try {
+      const stored = sessionStorage.getItem('resumeDraft');
+      if (stored) {
+        const draft = JSON.parse(stored);
+        if (draft.draft_type === 'new' && draft.inbox_id === inbox.id) {
+          setDraftId(draft.id);
+          setTo(draft.to_address || '');
+          setCc(draft.cc_address || '');
+          if (draft.cc_address) setShowCc(true);
+          setSubject(draft.subject || '');
+          if (editorRef.current && draft.body_html) {
+            editorRef.current.innerHTML = draft.body_html;
+          }
+          sessionStorage.removeItem('resumeDraft');
+        }
+      }
+    } catch (err) { console.error('Failed to load resumed draft:', err); }
+    setDraftLoaded(true);
+  }, [isEmail, inbox.id]);
+
+  // Auto-save draft
+  const { flush: flushDraft } = useAutoSave({
+    data: { to, cc, subject, draftLoaded },
+    shouldSave: () => isEmail && draftLoaded && (to.trim() !== '' || subject.trim() !== '' || (editorRef.current?.innerText.trim() || '') !== ''),
+    save: async () => {
+      const body_html = editorRef.current?.innerHTML || '';
+      const res = await fetch('/api/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: draftId,
+          draft_type: 'new',
+          inbox_id: inbox.id,
+          to_address: to,
+          cc_address: cc,
+          subject,
+          body_html,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.draft?.id && !draftId) setDraftId(data.draft.id);
+      }
+    },
+  });
 
   useEffect(() => {
     if (!isEmail) return;
@@ -233,6 +285,9 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           }
         }
       }
+      if (draftId) {
+        await fetch(`/api/drafts?id=${draftId}`, { method: 'DELETE' });
+      }
       onSent?.();
       onClose();
     } catch (err: any) {
@@ -262,7 +317,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
             <p className="text-xs text-analog-text-muted">{inbox.email_address}</p>
           </div>
           <button
-            onClick={onClose}
+            onClick={async () => { await flushDraft(); onClose(); }}
             className="ml-auto p-2 text-analog-text-muted hover:text-analog-text hover:bg-analog-hover rounded-lg transition-all duration-150"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -600,7 +655,16 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-5 py-4 border-t-2 border-analog-border-strong bg-analog-surface-alt">
           <button
-            onClick={onClose}
+            onClick={async () => {
+              if (draftId) {
+                if (confirm('Discard this draft?')) {
+                  await fetch(`/api/drafts?id=${draftId}`, { method: 'DELETE' });
+                  onClose();
+                }
+              } else {
+                onClose();
+              }
+            }}
             className="px-4 py-2 text-analog-text-muted hover:text-analog-text transition-colors text-sm font-medium"
           >
             Discard

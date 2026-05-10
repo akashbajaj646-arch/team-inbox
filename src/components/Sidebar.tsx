@@ -38,6 +38,22 @@ export default function Sidebar({
   const [expandedInboxes, setExpandedInboxes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [mentions, setMentions] = useState<any[]>([]);
+  const [draftCount, setDraftCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDraftCount() {
+      try {
+        const res = await fetch('/api/drafts');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setDraftCount((data.drafts || []).length);
+      } catch {}
+    }
+    loadDraftCount();
+    const interval = setInterval(loadDraftCount, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
   const [showMentions, setShowMentions] = useState(false);
   const supabase = createClient();
   const { elementRef: sidebarRef, startResize: startSidebarResize } = useResizable(256, 180, 380, 'sidebar-width');
@@ -385,6 +401,20 @@ export default function Sidebar({
             <path strokeLinecap="round" strokeLinejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
           </svg>
           Broadcasts
+        </button>
+
+        {/* Drafts */}
+        <button
+          onClick={() => { if (typeof window !== 'undefined') window.location.href = '/drafts'; }}
+          className="mt-2 w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 text-analog-text-muted hover:bg-analog-hover hover:text-analog-text"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+          </svg>
+          Drafts
+          {draftCount > 0 && (
+            <span className="ml-auto text-xs bg-analog-accent text-white rounded-full px-2 py-0.5 font-semibold">{draftCount}</span>
+          )}
         </button>
 
         {/* All Inboxes Search */}

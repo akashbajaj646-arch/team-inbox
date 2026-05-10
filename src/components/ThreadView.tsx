@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { useAutoSave } from '@/lib/use-autosave';
 import { extractInlineImages, attachImageResizer, attachImagePasteHandler, MAX_INLINE_IMAGES, type InlineImage } from '@/lib/inline-images';
 
 import { useState, useEffect, useRef } from 'react';
@@ -78,6 +79,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [presence, setPresence] = useState<ThreadPresence[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyBody, setReplyBody] = useState('');
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [sending, setSending] = useState(false);
   const [showComposer, setShowComposer] = useState(true);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -95,7 +98,10 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const supabase = createClient();
 
   useEffect(() => {
+    setDraftId(null);
+    setDraftLoaded(false);
     loadThread();
+    loadDraft();
     updatePresence('viewing');
     loadSignature();
 
@@ -195,6 +201,39 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       setUserSignature(data.email_signature);
       setReplyBody(`<p><br></p><p>--</p>${data.email_signature}`);
     }
+  }
+
+  async function loadDraft() {
+    try {
+      // First check sessionStorage for a resumed draft
+      const stored = sessionStorage.getItem('resumeDraft');
+      if (stored) {
+        const draft = JSON.parse(stored);
+        if (draft.draft_type === 'reply' && draft.thread_id === threadId) {
+          setDraftId(draft.id);
+          setReplyBody(draft.body_html || '');
+          if (draft.cc_address) { setCcField(draft.cc_address); setShowCcBcc(true); }
+          if (draft.bcc_address) { setBccField(draft.bcc_address); setShowCcBcc(true); }
+          setShowComposer(true);
+          sessionStorage.removeItem('resumeDraft');
+          setDraftLoaded(true);
+          return;
+        }
+      }
+      // Otherwise fetch any existing draft for this thread
+      const res = await fetch('/api/drafts');
+      if (res.ok) {
+        const data = await res.json();
+        const existing = (data.drafts || []).find((d: any) => d.thread_id === threadId && d.draft_type === 'reply');
+        if (existing) {
+          setDraftId(existing.id);
+          setReplyBody(existing.body_html || '');
+          if (existing.cc_address) { setCcField(existing.cc_address); setShowCcBcc(true); }
+          if (existing.bcc_address) { setBccField(existing.bcc_address); setShowCcBcc(true); }
+        }
+      }
+    } catch (err) { console.error('Draft load error:', err); }
+    setDraftLoaded(true);
   }
 
   async function loadThread() {
@@ -317,6 +356,10 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       });
 
       if (response.ok) {
+        if (draftId) {
+          await fetch(`/api/drafts?id=${draftId}`, { method: 'DELETE' });
+          setDraftId(null);
+        }
         setReplyBody('');
         setAttachments([]);
         setCcField('');
@@ -331,6 +374,30 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
     setSending(false);
   }
+
+  // Auto-save reply draft
+  const { flush: flushDraft } = useAutoSave({
+    data: { replyBody, ccField, bccField, showComposer, draftLoaded },
+    shouldSave: () => draftLoaded && showComposer && replyBody.trim() !== '' && replyBody !== '<p></p>',
+    save: async () => {
+      const res = await fetch('/api/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: draftId,
+          draft_type: 'reply',
+          thread_id: threadId,
+          cc_address: ccField,
+          bcc_address: bccField,
+          body_html: replyBody,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.draft?.id && !draftId) setDraftId(data.draft.id);
+      }
+    },
+  });
 
   function fileToBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
