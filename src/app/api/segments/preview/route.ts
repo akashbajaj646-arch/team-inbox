@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  let query = supabase
+  let query: any = supabase
     .from('inbox_contacts')
     .select('id, company_name, first_name, last_name, email_1, total_spend, last_invoice_date, categories_purchased', { count: 'exact' })
     .not('email_1', 'is', null);

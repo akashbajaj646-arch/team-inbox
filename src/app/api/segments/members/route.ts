@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   function buildQuery() {
-    let q = supabase
+    let q: any = supabase
       .from('inbox_contacts')
       .select('id, company_name, first_name, last_name, email_1, phone_number, city, state, total_spend, total_invoices, last_invoice_date, categories_purchased, sms_opted_out');
     
