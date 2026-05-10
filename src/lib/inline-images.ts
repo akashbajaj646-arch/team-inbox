@@ -76,7 +76,7 @@ export function attachImageResizer(editor: HTMLElement): () => void {
   function makeToolbar() {
     const div = document.createElement('div');
     div.contentEditable = 'false';
-    div.style.cssText = 'position:absolute;z-index:100;background:#fff;border:1px solid #e5e5e5;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);padding:4px;display:flex;gap:2px;font-family:inherit;';
+    div.style.cssText = 'position:fixed;z-index:99999;background:#fff;border:1px solid #e5e5e5;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:4px;display:flex;gap:2px;font-family:inherit;';
     (Object.keys(SIZES) as SizePreset[]).forEach(label => {
       const btn = document.createElement('button');
       btn.textContent = label;
@@ -110,16 +110,19 @@ export function attachImageResizer(editor: HTMLElement): () => void {
   function positionToolbar() {
     if (!toolbar || !activeImg) return;
     const r = activeImg.getBoundingClientRect();
-    const editorR = editor.getBoundingClientRect();
-    toolbar.style.top = (r.top - editorR.top - 36 + editor.scrollTop) + 'px';
-    toolbar.style.left = (r.left - editorR.left + editor.scrollLeft) + 'px';
+    // If toolbar would go above viewport, show it below the image instead
+    const tbHeight = 36;
+    let top = r.top - tbHeight - 4;
+    if (top < 8) top = r.bottom + 4;
+    toolbar.style.top = top + 'px';
+    toolbar.style.left = Math.max(8, r.left) + 'px';
   }
 
   function showFor(img: HTMLImageElement) {
     activeImg = img;
     if (!toolbar) {
       toolbar = makeToolbar();
-      editor.appendChild(toolbar);
+      document.body.appendChild(toolbar);
     }
     toolbar.style.display = 'flex';
     positionToolbar();
