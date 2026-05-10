@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { extractInlineImages, attachImageResizer, attachImagePasteHandler, MAX_INLINE_IMAGES, type InlineImage } from '@/lib/inline-images';
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -89,6 +90,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
   const [messageAttachments, setMessageAttachments] = useState<Record<string, any[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inlineRegistryRef = useRef<Map<string, InlineImage>>(new Map());
+  const [inlineCount, setInlineCount] = useState(0);
   const supabase = createClient();
 
   useEffect(() => {
@@ -134,6 +137,36 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       supabase.removeChannel(presenceChannel);
     };
   }, [threadId]);
+
+  useEffect(() => {
+    if (!showComposer) return;
+    // Find the contentEditable inside RichTextEditor
+    const tryAttach = () => {
+      const editor = document.querySelector('[contenteditable="true"]') as HTMLElement | null;
+      if (!editor) { setTimeout(tryAttach, 100); return null; }
+      const cleanupResize = attachImageResizer(editor);
+      const cleanupPaste = attachImagePasteHandler(editor, {
+        canAddMore: () => inlineRegistryRef.current.size < MAX_INLINE_IMAGES,
+        onTooMany: () => alert(`Maximum ${MAX_INLINE_IMAGES} inline images allowed.`),
+        onWouldExceedSize: (bytes) => {
+          const totalAttachBytes = attachments.reduce((s, f) => s + f.size, 0);
+          const inlineBytes = Array.from(inlineRegistryRef.current.values()).reduce((s, m) => s + Math.floor(m.data.length * 0.75), 0);
+          if (totalAttachBytes + inlineBytes + bytes > 25 * 1024 * 1024) {
+            alert('Adding this image would exceed the 25MB total size limit.');
+            return true;
+          }
+          return false;
+        },
+        onAdded: (meta) => {
+          inlineRegistryRef.current.set(meta.cid, meta);
+          setInlineCount(inlineRegistryRef.current.size);
+        },
+      });
+      return () => { cleanupResize(); cleanupPaste(); };
+    };
+    const cleanup = tryAttach();
+    return () => { if (cleanup) cleanup(); };
+  }, [showComposer]);
 
   useEffect(() => {
     if (showComposer && replyBody.length > 0) {
@@ -245,7 +278,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setSending(true);
 
     try {
-      const uploadedAttachments: { filename: string; mimeType: string; data: string }[] = [];
+      const uploadedAttachments: { filename: string; mimeType: string; data: string; inline?: boolean; cid?: string }[] = [];
 
       for (const attachment of attachments) {
         const base64 = await fileToBase64(attachment.file);
@@ -256,12 +289,18 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
         });
       }
 
+      // Extract inline images from the reply body and rewrite to cid: refs
+      const { html: rewrittenBody, inlineImages } = extractInlineImages(replyBody, inlineRegistryRef.current);
+      for (const img of inlineImages) {
+        uploadedAttachments.push({ ...img, inline: true });
+      }
+
       const response = await fetch('/api/emails/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           threadId,
-          body: replyBody,
+          body: rewrittenBody,
           attachments: uploadedAttachments,
           cc: ccField.trim() || undefined,
           bcc: bccField.trim() || undefined,

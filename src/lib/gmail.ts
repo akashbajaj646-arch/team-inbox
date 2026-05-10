@@ -190,6 +190,8 @@ export async function sendReply(
       filename: string;
       mimeType: string;
       data: string; // base64 encoded
+      inline?: boolean;
+      cid?: string;
     }>;
   }
 ) {
@@ -198,57 +200,105 @@ export async function sendReply(
   let email: string;
   
   if (options.attachments && options.attachments.length > 0) {
-    // Build multipart email with attachments
-    const boundary = `boundary_${Date.now()}_${Math.random().toString(36).substr(2)}`;
-    
+    // Separate inline (CID-referenced) from regular attachments
+    const inlineAttachments = options.attachments.filter((a: any) => a.inline && a.cid);
+    const regularAttachments = options.attachments.filter((a: any) => !a.inline);
+    const hasInline = inlineAttachments.length > 0;
+    const hasRegular = regularAttachments.length > 0;
+
+    const mixedBoundary = `mixed_${Date.now()}_${Math.random().toString(36).substr(2)}`;
+    const relatedBoundary = `related_${Date.now()}_${Math.random().toString(36).substr(2)}`;
+
     const emailLines = [
       `To: ${options.to}`,
     ];
-    
-    if (options.cc) {
-      emailLines.push(`Cc: ${options.cc}`);
-    }
-    
-    if (options.bcc) {
-      emailLines.push(`Bcc: ${options.bcc}`);
-    }
-    
+
+    if (options.cc) emailLines.push(`Cc: ${options.cc}`);
+    if (options.bcc) emailLines.push(`Bcc: ${options.bcc}`);
+
     emailLines.push(`Subject: ${options.subject}`);
     emailLines.push('MIME-Version: 1.0');
-    emailLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
-    
-    if (options.inReplyTo) {
-      emailLines.push(`In-Reply-To: ${options.inReplyTo}`);
+
+    // Choose top-level Content-Type based on what we have
+    if (hasRegular) {
+      emailLines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+    } else {
+      // Only inline images: multipart/related at the top level
+      emailLines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
     }
-    
-    if (options.references) {
-      emailLines.push(`References: ${options.references}`);
-    }
-    
+
+    if (options.inReplyTo) emailLines.push(`In-Reply-To: ${options.inReplyTo}`);
+    if (options.references) emailLines.push(`References: ${options.references}`);
+
     emailLines.push('');
-    emailLines.push(`--${boundary}`);
-    emailLines.push('Content-Type: text/html; charset=utf-8');
-    emailLines.push('Content-Transfer-Encoding: 7bit');
-    emailLines.push('');
-    emailLines.push(options.body);
-    
-    // Add attachments
-    for (const attachment of options.attachments) {
-      emailLines.push(`--${boundary}`);
-      emailLines.push(`Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`);
-      emailLines.push('Content-Transfer-Encoding: base64');
-      emailLines.push(`Content-Disposition: attachment; filename="${attachment.filename}"`);
+
+    if (hasRegular && hasInline) {
+      // Outer mixed: related part + each regular attachment
+      emailLines.push(`--${mixedBoundary}`);
+      emailLines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
       emailLines.push('');
-      
-      // Split base64 data into 76-character lines (RFC 2045)
-      const base64Data = attachment.data;
-      for (let i = 0; i < base64Data.length; i += 76) {
-        emailLines.push(base64Data.slice(i, i + 76));
+      // HTML body
+      emailLines.push(`--${relatedBoundary}`);
+      emailLines.push('Content-Type: text/html; charset=utf-8');
+      emailLines.push('Content-Transfer-Encoding: 7bit');
+      emailLines.push('');
+      emailLines.push(options.body);
+      // Inline images
+      for (const a of inlineAttachments) {
+        emailLines.push(`--${relatedBoundary}`);
+        emailLines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push(`Content-Disposition: inline; filename="${a.filename}"`);
+        emailLines.push(`Content-ID: <${a.cid}>`);
+        emailLines.push('');
+        for (let i = 0; i < a.data.length; i += 76) emailLines.push(a.data.slice(i, i + 76));
       }
+      emailLines.push(`--${relatedBoundary}--`);
+      // Regular attachments
+      for (const a of regularAttachments) {
+        emailLines.push(`--${mixedBoundary}`);
+        emailLines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push(`Content-Disposition: attachment; filename="${a.filename}"`);
+        emailLines.push('');
+        for (let i = 0; i < a.data.length; i += 76) emailLines.push(a.data.slice(i, i + 76));
+      }
+      emailLines.push(`--${mixedBoundary}--`);
+    } else if (hasInline) {
+      // Only inline (we used multipart/related at top)
+      emailLines.push(`--${relatedBoundary}`);
+      emailLines.push('Content-Type: text/html; charset=utf-8');
+      emailLines.push('Content-Transfer-Encoding: 7bit');
+      emailLines.push('');
+      emailLines.push(options.body);
+      for (const a of inlineAttachments) {
+        emailLines.push(`--${relatedBoundary}`);
+        emailLines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push(`Content-Disposition: inline; filename="${a.filename}"`);
+        emailLines.push(`Content-ID: <${a.cid}>`);
+        emailLines.push('');
+        for (let i = 0; i < a.data.length; i += 76) emailLines.push(a.data.slice(i, i + 76));
+      }
+      emailLines.push(`--${relatedBoundary}--`);
+    } else {
+      // Only regular attachments — original flow
+      emailLines.push(`--${mixedBoundary}`);
+      emailLines.push('Content-Type: text/html; charset=utf-8');
+      emailLines.push('Content-Transfer-Encoding: 7bit');
+      emailLines.push('');
+      emailLines.push(options.body);
+      for (const a of regularAttachments) {
+        emailLines.push(`--${mixedBoundary}`);
+        emailLines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        emailLines.push('Content-Transfer-Encoding: base64');
+        emailLines.push(`Content-Disposition: attachment; filename="${a.filename}"`);
+        emailLines.push('');
+        for (let i = 0; i < a.data.length; i += 76) emailLines.push(a.data.slice(i, i + 76));
+      }
+      emailLines.push(`--${mixedBoundary}--`);
     }
-    
-    emailLines.push(`--${boundary}--`);
-    
+
     email = emailLines.join('\r\n');
   } else {
     // Build simple email without attachments
@@ -438,20 +488,116 @@ export async function sendUnsubscribeEmail(refreshToken: string, mailtoAddress: 
 // Send a new email (not a reply) - used for broadcasts
 export async function sendNewEmail(
   refreshToken: string,
-  options: { to: string; subject: string; body: string; cc?: string; bcc?: string }
+  options: {
+    to: string;
+    subject: string;
+    body: string;
+    cc?: string;
+    bcc?: string;
+    attachments?: Array<{ filename: string; mimeType: string; data: string; inline?: boolean; cid?: string }>;
+  }
 ) {
   const gmail = createGmailClient(refreshToken);
-  const lines = [
-    `To: ${options.to}`,
-    options.cc ? `Cc: ${options.cc}` : '',
-    options.bcc ? `Bcc: ${options.bcc}` : '',
-    `Subject: ${options.subject}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/html; charset=utf-8',
-    '',
-    options.body,
-  ].filter(Boolean);
-  const email = lines.join('\r\n');
+  let email: string;
+
+  if (options.attachments && options.attachments.length > 0) {
+    const inlineAttachments = options.attachments.filter((a: any) => a.inline && a.cid);
+    const regularAttachments = options.attachments.filter((a: any) => !a.inline);
+    const hasInline = inlineAttachments.length > 0;
+    const hasRegular = regularAttachments.length > 0;
+
+    const mixedBoundary = `mixed_${Date.now()}_${Math.random().toString(36).substr(2)}`;
+    const relatedBoundary = `related_${Date.now()}_${Math.random().toString(36).substr(2)}`;
+
+    const lines: string[] = [`To: ${options.to}`];
+    if (options.cc) lines.push(`Cc: ${options.cc}`);
+    if (options.bcc) lines.push(`Bcc: ${options.bcc}`);
+    lines.push(`Subject: ${options.subject}`);
+    lines.push('MIME-Version: 1.0');
+
+    if (hasRegular) {
+      lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+    } else {
+      lines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
+    }
+    lines.push('');
+
+    if (hasRegular && hasInline) {
+      lines.push(`--${mixedBoundary}`);
+      lines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
+      lines.push('');
+      lines.push(`--${relatedBoundary}`);
+      lines.push('Content-Type: text/html; charset=utf-8');
+      lines.push('Content-Transfer-Encoding: 7bit');
+      lines.push('');
+      lines.push(options.body);
+      for (const a of inlineAttachments) {
+        lines.push(`--${relatedBoundary}`);
+        lines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-Disposition: inline; filename="${a.filename}"`);
+        lines.push(`Content-ID: <${a.cid}>`);
+        lines.push('');
+        for (let i = 0; i < a.data.length; i += 76) lines.push(a.data.slice(i, i + 76));
+      }
+      lines.push(`--${relatedBoundary}--`);
+      for (const a of regularAttachments) {
+        lines.push(`--${mixedBoundary}`);
+        lines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-Disposition: attachment; filename="${a.filename}"`);
+        lines.push('');
+        for (let i = 0; i < a.data.length; i += 76) lines.push(a.data.slice(i, i + 76));
+      }
+      lines.push(`--${mixedBoundary}--`);
+    } else if (hasInline) {
+      lines.push(`--${relatedBoundary}`);
+      lines.push('Content-Type: text/html; charset=utf-8');
+      lines.push('Content-Transfer-Encoding: 7bit');
+      lines.push('');
+      lines.push(options.body);
+      for (const a of inlineAttachments) {
+        lines.push(`--${relatedBoundary}`);
+        lines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-Disposition: inline; filename="${a.filename}"`);
+        lines.push(`Content-ID: <${a.cid}>`);
+        lines.push('');
+        for (let i = 0; i < a.data.length; i += 76) lines.push(a.data.slice(i, i + 76));
+      }
+      lines.push(`--${relatedBoundary}--`);
+    } else {
+      lines.push(`--${mixedBoundary}`);
+      lines.push('Content-Type: text/html; charset=utf-8');
+      lines.push('Content-Transfer-Encoding: 7bit');
+      lines.push('');
+      lines.push(options.body);
+      for (const a of regularAttachments) {
+        lines.push(`--${mixedBoundary}`);
+        lines.push(`Content-Type: ${a.mimeType}; name="${a.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-Disposition: attachment; filename="${a.filename}"`);
+        lines.push('');
+        for (let i = 0; i < a.data.length; i += 76) lines.push(a.data.slice(i, i + 76));
+      }
+      lines.push(`--${mixedBoundary}--`);
+    }
+
+    email = lines.join('\r\n');
+  } else {
+    const lines = [
+      `To: ${options.to}`,
+      options.cc ? `Cc: ${options.cc}` : '',
+      options.bcc ? `Bcc: ${options.bcc}` : '',
+      `Subject: ${options.subject}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      options.body,
+    ].filter(Boolean);
+    email = lines.join('\r\n');
+  }
+
   const response = await gmail.users.messages.send({
     userId: 'me',
     requestBody: { raw: Buffer.from(email).toString('base64url') },

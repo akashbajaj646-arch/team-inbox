@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
-import { getThread, extractBody } from '@/lib/gmail';
+import { getThread, extractBody, sendNewEmail } from '@/lib/gmail';
 import { google } from 'googleapis';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +17,7 @@ function createGmailClient(refreshToken: string) {
 
 export async function POST(request: Request) {
   try {
-    const { inboxId, to, cc, subject, body } = await request.json();
+    const { inboxId, to, cc, bcc, subject, body, attachments = [] } = await request.json();
 
     if (!inboxId || !to || !subject || !body) {
       return NextResponse.json(
@@ -51,28 +51,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Inbox not connected to Google' }, { status: 400 });
     }
 
-    const emailLines = [
-      `To: ${to}`,
-      `From: ${inbox.email_address}`,
-      ...(cc ? [`Cc: ${cc}`] : []),
-      `Subject: ${subject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=utf-8',
-      '',
+    const sentMessage = await sendNewEmail(inbox.google_refresh_token, {
+      to,
+      cc: cc || undefined,
+      bcc: bcc || undefined,
+      subject,
       body,
-    ];
-    const email = emailLines.join('\r\n');
-
-    const encodedEmail = Buffer.from(email).toString('base64url');
-
-    const gmail = createGmailClient(inbox.google_refresh_token);
-    const sentMessage = await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: { raw: encodedEmail },
+      attachments,
     });
 
-    if (sentMessage.data.threadId) {
-      const gmailThread = await getThread(inbox.google_refresh_token, sentMessage.data.threadId);
+    if (sentMessage.threadId) {
+      const gmailThread = await getThread(inbox.google_refresh_token, sentMessage.threadId);
       const firstMessage = gmailThread.messages?.[0];
 
       if (firstMessage) {
@@ -80,7 +69,7 @@ export async function POST(request: Request) {
           .from('email_threads')
           .insert({
             inbox_id: inboxId,
-            gmail_thread_id: sentMessage.data.threadId,
+            gmail_thread_id: sentMessage.threadId,
             subject,
             snippet: body.replace(/<[^>]*>/g, '').slice(0, 100),
             last_message_at: new Date().toISOString(),
@@ -96,7 +85,7 @@ export async function POST(request: Request) {
 
           await serviceSupabase.from('email_messages').insert({
             thread_id: newThread.id,
-            gmail_message_id: sentMessage.data.id,
+            gmail_message_id: sentMessage.id,
             from_address: inbox.email_address,
             from_name: null,
             to_addresses: [to],
@@ -111,7 +100,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, messageId: sentMessage.data.id });
+    return NextResponse.json({ success: true, messageId: sentMessage.id });
   } catch (err) {
     console.error('Send new email error:', err);
     return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });

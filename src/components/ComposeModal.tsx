@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Inbox, User } from '@/types';
 import TemplatePicker from './TemplatePicker';
+import { MAX_EMAIL_FILES, MAX_EMAIL_TOTAL_BYTES, validateEmailAttachments, formatFileSize, getTotalSize, MAX_SMS_FILES, MAX_WHATSAPP_FILES, validateSmsAttachments, isRiskyFile } from '@/lib/attachments';
+import { extractInlineImages, attachImageResizer, attachImagePasteHandler, MAX_INLINE_IMAGES, type InlineImage } from '@/lib/inline-images';
 
 interface ComposeModalProps {
   inbox: Inbox;
@@ -25,8 +27,10 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
-  const [smsMedia, setSmsMedia] = useState<File | null>(null);
-  const [smsMediaPreview, setSmsMediaPreview] = useState<string | null>(null);
+  const inlineRegistryRef = useRef<Map<string, InlineImage>>(new Map());
+  const [inlineCount, setInlineCount] = useState(0);
+  const [smsMedia, setSmsMedia] = useState<File[]>([]);
+  const [smsMediaPreviews, setSmsMediaPreviews] = useState<string[]>([]);
   const [fontSize, setFontSize] = useState('3');
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -57,6 +61,30 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const fileInputRef = useRef<HTMLInputElement>(null);
   const smsFileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!isEmail || !editorRef.current) return;
+    const editor = editorRef.current;
+    const cleanupResize = attachImageResizer(editor);
+    const cleanupPaste = attachImagePasteHandler(editor, {
+      canAddMore: () => inlineRegistryRef.current.size < MAX_INLINE_IMAGES,
+      onTooMany: () => alert(`Maximum ${MAX_INLINE_IMAGES} inline images allowed.`),
+      onWouldExceedSize: (bytes) => {
+        const totalAttachBytes = attachments.reduce((s, f) => s + f.size, 0);
+        const inlineBytes = Array.from(inlineRegistryRef.current.values()).reduce((s, m) => s + Math.floor(m.data.length * 0.75), 0);
+        if (totalAttachBytes + inlineBytes + bytes > 25 * 1024 * 1024) {
+          alert('Adding this image would exceed the 25MB total size limit.');
+          return true;
+        }
+        return false;
+      },
+      onAdded: (meta) => {
+        inlineRegistryRef.current.set(meta.cid, meta);
+        setInlineCount(inlineRegistryRef.current.size);
+      },
+    });
+    return () => { cleanupResize(); cleanupPaste(); };
+  }, [isEmail, attachments]);
+
   function execCmd(command: string, value?: string) {
     editorRef.current?.focus();
     document.execCommand(command, false, value);
@@ -77,13 +105,35 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
     setSending(true);
     try {
       if (isEmail) {
-        const bodyHtml = editorRef.current?.innerHTML || '';
+        const rawHtml = editorRef.current?.innerHTML || '';
         const bodyText = editorRef.current?.innerText || '';
+        // Extract inline images and rewrite img src to cid:
+        const { html: bodyHtml, inlineImages } = extractInlineImages(rawHtml, inlineRegistryRef.current);
         if (!to.trim() || !subject.trim() || !bodyText.trim()) {
           setError('To, Subject, and Body are required.');
           setSending(false);
           return;
         }
+        const v = validateEmailAttachments(attachments);
+        if (!v.ok) { setError(v.error || 'Invalid attachments'); setSending(false); return; }
+        if (v.warnings && v.warnings.length > 0) {
+          if (!confirm(v.warnings[0] + '\n\nSend anyway?')) { setSending(false); return; }
+        }
+        // Convert regular attachments to base64
+        const regularAttachments = await Promise.all(attachments.map(async (file) => ({
+          filename: file.name,
+          mimeType: file.type,
+          data: await new Promise<string>((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res((r.result as string).split(',')[1]);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          }),
+        })));
+        const allAttachments = [
+          ...regularAttachments,
+          ...inlineImages.map(img => ({ ...img, inline: true })),
+        ];
         const res = await fetch('/api/emails/send-new', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -93,6 +143,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
             cc: cc.trim() || undefined,
             subject: subject.trim(),
             body: bodyHtml,
+            attachments: allAttachments,
             isNew: true,
           }),
         });
@@ -101,37 +152,70 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           throw new Error(d.error || 'Failed to send email');
         }
       } else {
-        if (!phone.trim() || (!message.trim() && !smsMedia)) {
+        if (!phone.trim() || (!message.trim() && smsMedia.length === 0)) {
           setError('Phone number and message or media are required.');
           setSending(false);
           return;
         }
-        let mediaUrls: string[] = [];
-        if (smsMedia) {
-          const { createClient } = await import('@/lib/supabase/client');
-          const supabase = createClient();
-          const ext = smsMedia.name.split('.').pop();
-          const filename = `sms-media/${Date.now()}.${ext}`;
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('attachments')
-            .upload(filename, smsMedia);
-          if (uploadError) throw uploadError;
-          const { data: { publicUrl } } = supabase.storage.from('attachments').getPublicUrl(filename);
-          mediaUrls = [publicUrl];
+        // Validate
+        if (isWhatsApp) {
+          if (smsMedia.length > MAX_WHATSAPP_FILES) {
+            setError(`WhatsApp supports up to ${MAX_WHATSAPP_FILES} files.`);
+            setSending(false); return;
+          }
+        } else {
+          const v = validateSmsAttachments(smsMedia);
+          if (!v.ok) { setError(v.error || 'Invalid attachments'); setSending(false); return; }
         }
-        const res = await fetch('/api/sms/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            inboxId: inbox.id,
-            to: phone.trim(),
-            body: message.trim(),
-            mediaUrls,
-          }),
-        });
-        if (!res.ok) {
-          const d = await res.json();
-          throw new Error(d.error || 'Failed to send message');
+
+        // Upload all files first
+        const { createClient } = await import('@/lib/supabase/client');
+        const supabase = createClient();
+        const mediaUrls: string[] = [];
+        for (const file of smsMedia) {
+          const ext = file.name.split('.').pop();
+          const filename = `sms-media/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const { error: upErr } = await supabase.storage.from('attachments').upload(filename, file);
+          if (upErr) throw upErr;
+          const { data: { publicUrl } } = supabase.storage.from('attachments').getPublicUrl(filename);
+          mediaUrls.push(publicUrl);
+        }
+
+        if (isWhatsApp && mediaUrls.length > 1) {
+          // WhatsApp: send each media as its own message (mimics phone behavior)
+          for (let i = 0; i < mediaUrls.length; i++) {
+            const isFirst = i === 0;
+            const res = await fetch('/api/sms/send-new', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                inboxId: inbox.id,
+                to: phone.trim(),
+                body: isFirst ? message.trim() : '',  // text only on first message
+                mediaUrls: [mediaUrls[i]],
+              }),
+            });
+            if (!res.ok) {
+              const d = await res.json();
+              throw new Error(d.error || `Failed to send message ${i + 1}`);
+            }
+          }
+        } else {
+          // SMS or single-media WhatsApp: one request
+          const res = await fetch('/api/sms/send-new', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              inboxId: inbox.id,
+              to: phone.trim(),
+              body: message.trim(),
+              mediaUrls,
+            }),
+          });
+          if (!res.ok) {
+            const d = await res.json();
+            throw new Error(d.error || 'Failed to send message');
+          }
         }
       }
       onSent?.();
@@ -334,7 +418,11 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                   multiple
                   className="hidden"
                   onChange={(e) => {
-                    setAttachments(prev => [...prev, ...Array.from(e.target.files || [])]);
+                    const newFiles = Array.from(e.target.files || []);
+                    const combined = [...attachments, ...newFiles];
+                    const v = validateEmailAttachments(combined);
+                    if (!v.ok) { alert(v.error); e.target.value = ''; return; }
+                    setAttachments(combined);
                     e.target.value = '';
                   }}
                 />
@@ -362,24 +450,38 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
 
               {/* Attachment list */}
               {attachments.length > 0 && (
-                <div className="px-5 py-3 border-t border-analog-border flex flex-wrap gap-2">
-                  {attachments.map((f, i) => (
-                    <div key={i} className="flex items-center gap-1.5 bg-analog-surface-alt border border-analog-border rounded-lg px-2.5 py-1.5 text-xs text-analog-text-muted">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                      </svg>
-                      <span className="truncate max-w-[120px]">{f.name}</span>
-                      <span className="text-analog-text-faint">({formatFileSize(f.size)})</span>
-                      <button
-                        onClick={() => setAttachments(prev => prev.filter((_, j) => j !== i))}
-                        className="ml-1 text-analog-text-faint hover:text-analog-error transition-colors"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
+                <div className="px-5 py-3 border-t border-analog-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-analog-text-faint">
+                      {attachments.length} file{attachments.length !== 1 ? 's' : ''} ({formatFileSize(getTotalSize(attachments))} of 25 MB)
+                    </span>
+                    {getTotalSize(attachments) > MAX_EMAIL_TOTAL_BYTES * 0.9 && (
+                      <span className="text-xs font-medium text-amber-600">Approaching size limit</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map((f, i) => {
+                      const risky = isRiskyFile(f.name);
+                      return (
+                        <div key={i} className={`flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 text-xs ${risky ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-analog-surface-alt border-analog-border text-analog-text-muted'}`}>
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                          </svg>
+                          <span className="truncate max-w-[140px]" title={f.name}>{f.name}</span>
+                          <span className="text-analog-text-faint">({formatFileSize(f.size)})</span>
+                          {risky && <span title="Gmail may reject this file type">⚠</span>}
+                          <button
+                            onClick={() => setAttachments(prev => prev.filter((_, j) => j !== i))}
+                            className="ml-1 text-analog-text-faint hover:text-analog-error transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -409,39 +511,68 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                   className="input w-full resize-none"
                 />
               </div>
-              {isSms && (
+              {(isSms || isWhatsApp) && (
                 <div>
-                  <label className="block text-xs font-semibold text-analog-text-faint mb-1.5">Media (optional)</label>
-                  {smsMediaPreview ? (
-                    <div className="relative inline-block">
-                      <img src={smsMediaPreview} alt="Preview" className="h-24 rounded-lg border border-analog-border" />
-                      <button
-                        onClick={() => { setSmsMedia(null); setSmsMediaPreview(null); }}
-                        className="absolute -top-2 -right-2 w-5 h-5 bg-analog-error text-white rounded-full text-xs flex items-center justify-center"
-                      >×</button>
+                  <label className="block text-xs font-semibold text-analog-text-faint mb-1.5">
+                    Media (optional)
+                    {isWhatsApp && smsMedia.length > 1 && <span className="text-analog-text-faint normal-case ml-2">— each will be sent as a separate message</span>}
+                  </label>
+                  {smsMedia.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {smsMedia.map((file, i) => (
+                        <div key={i} className="relative">
+                          {file.type.startsWith('image/') ? (
+                            <img src={smsMediaPreviews[i]} alt={file.name} className="h-20 w-20 object-cover rounded-lg border border-analog-border" />
+                          ) : (
+                            <div className="h-20 w-20 flex flex-col items-center justify-center rounded-lg border border-analog-border bg-analog-surface-alt p-1">
+                              <svg className="w-5 h-5 text-analog-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <span className="text-[9px] text-analog-text-muted truncate w-full text-center mt-1">{file.name}</span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => {
+                              setSmsMedia(prev => prev.filter((_, j) => j !== i));
+                              setSmsMediaPreviews(prev => prev.filter((_, j) => j !== i));
+                            }}
+                            className="absolute -top-2 -right-2 w-5 h-5 bg-analog-error text-white rounded-full text-xs flex items-center justify-center"
+                          >×</button>
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => smsFileInputRef.current?.click()}
-                      className="btn btn-secondary text-sm"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                      </svg>
-                      Attach Image
-                    </button>
                   )}
+                  <button
+                    onClick={() => smsFileInputRef.current?.click()}
+                    className="btn btn-secondary text-sm"
+                    disabled={isSms ? smsMedia.length >= MAX_SMS_FILES : smsMedia.length >= MAX_WHATSAPP_FILES}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    Attach {isWhatsApp ? 'Files' : 'Images'}
+                    {smsMedia.length > 0 && ` (${smsMedia.length}/${isSms ? MAX_SMS_FILES : MAX_WHATSAPP_FILES})`}
+                  </button>
                   <input
                     ref={smsFileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={isSms ? "image/*" : undefined}
+                    multiple
                     className="hidden"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setSmsMedia(file);
-                        setSmsMediaPreview(URL.createObjectURL(file));
+                      const files = Array.from(e.target.files || []);
+                      const combined = [...smsMedia, ...files];
+                      const max = isSms ? MAX_SMS_FILES : MAX_WHATSAPP_FILES;
+                      if (combined.length > max) {
+                        alert(`Maximum ${max} files allowed.`);
+                        e.target.value = ''; return;
                       }
+                      if (isSms) {
+                        const v = validateSmsAttachments(combined);
+                        if (!v.ok) { alert(v.error); e.target.value = ''; return; }
+                      }
+                      setSmsMedia(combined);
+                      setSmsMediaPreviews([...smsMediaPreviews, ...files.map(f => URL.createObjectURL(f))]);
                       e.target.value = '';
                     }}
                   />

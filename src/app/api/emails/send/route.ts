@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic';
 interface AttachmentData {
   filename: string;
   mimeType: string;
+  inline?: boolean;
+  cid?: string;
   data: string; // base64 encoded
 }
 

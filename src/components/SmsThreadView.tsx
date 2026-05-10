@@ -7,6 +7,7 @@ import CommentSection from './CommentSection';
 import SkuPicker from './SkuPicker';
 import CustomerCard from './CustomerCard';
 import TemplatePicker from './TemplatePicker';
+import { MAX_SMS_FILES, MAX_WHATSAPP_FILES, validateSmsAttachments, formatFileSize } from '@/lib/attachments';
 import WhatsAppTemplatePicker from './WhatsAppTemplatePicker';
 
 interface Product {
@@ -47,8 +48,8 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
   const [showSkuPicker, setShowSkuPicker] = useState(false);
   const [skuSearchQuery, setSkuSearchQuery] = useState('');
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
   const [contentSid, setContentSid] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -171,48 +172,81 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   }
 
   async function handleSend() {
-    if (!newMessage.trim() && !mediaFile && !contentSid || sending) return;
+    if (!newMessage.trim() && mediaFiles.length === 0 && !contentSid || sending) return;
     setSending(true);
 
-    let mediaUrls: string[] = [];
-
-    if (mediaFile) {
-      const { createClient } = await import('@/lib/supabase/client');
-      const supabase = createClient();
-      const ext = mediaFile.name.split('.').pop();
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('sms-media')
-        .upload(filename, mediaFile, { contentType: mediaFile.type, upsert: false });
-      if (uploadError) {
-        alert('Failed to upload image');
-        setSending(false);
-        return;
-      }
-      const { data: { publicUrl } } = supabase.storage.from('sms-media').getPublicUrl(filename);
-      mediaUrls = [publicUrl];
+    // Validate
+    if (!isWhatsApp && mediaFiles.length > 0) {
+      const v = validateSmsAttachments(mediaFiles);
+      if (!v.ok) { alert(v.error); setSending(false); return; }
+    }
+    if (isWhatsApp && mediaFiles.length > MAX_WHATSAPP_FILES) {
+      alert(`WhatsApp supports up to ${MAX_WHATSAPP_FILES} files.`);
+      setSending(false); return;
     }
 
-    const response = await fetch('/api/sms/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        threadId,
-        body: newMessage.trim() || undefined,
-        mediaUrls: mediaUrls.length ? mediaUrls : undefined,
-        contentSid: contentSid || undefined,
-      }),
-    });
+    // Upload all files
+    const { createClient } = await import('@/lib/supabase/client');
+    const supabase = createClient();
+    const mediaUrls: string[] = [];
+    for (const file of mediaFiles) {
+      const ext = file.name.split('.').pop();
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('sms-media')
+        .upload(filename, file, { contentType: file.type, upsert: false });
+      if (upErr) {
+        alert(`Failed to upload ${file.name}`);
+        setSending(false); return;
+      }
+      const { data: { publicUrl } } = supabase.storage.from('sms-media').getPublicUrl(filename);
+      mediaUrls.push(publicUrl);
+    }
 
-    if (response.ok) {
+    try {
+      if (isWhatsApp && mediaUrls.length > 1) {
+        // WhatsApp: send each media as its own message (mimics phone behavior)
+        for (let i = 0; i < mediaUrls.length; i++) {
+          const isFirst = i === 0;
+          const res = await fetch('/api/sms/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              threadId,
+              body: isFirst ? (newMessage.trim() || undefined) : undefined,
+              mediaUrls: [mediaUrls[i]],
+              contentSid: isFirst ? (contentSid || undefined) : undefined,
+            }),
+          });
+          if (!res.ok) {
+            const d = await res.json();
+            throw new Error(d.error || `Failed to send message ${i + 1}`);
+          }
+        }
+      } else {
+        const response = await fetch('/api/sms/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            threadId,
+            body: newMessage.trim() || undefined,
+            mediaUrls: mediaUrls.length ? mediaUrls : undefined,
+            contentSid: contentSid || undefined,
+          }),
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || 'Failed to send message');
+        }
+      }
+
       setNewMessage('');
-      setMediaFile(null);
-      setMediaPreview(null);
+      setMediaFiles([]);
+      setMediaPreviews([]);
       setContentSid(null);
       loadMessages();
-    } else {
-      const data = await response.json();
-      alert(data.error || 'Failed to send message');
+    } catch (err: any) {
+      alert(err.message || 'Failed to send message');
     }
 
     setSending(false);
@@ -454,13 +488,35 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
         {/* Composer */}
         <div className="border-t border-analog-border-light bg-analog-surface px-6 py-4">
           <div className="max-w-2xl mx-auto">
-            {mediaPreview && (
-              <div className="mb-2 relative inline-block">
-                <img src={mediaPreview} alt="Attachment preview" className="h-20 rounded-lg border border-analog-border" />
-                <button
-                  onClick={() => { setMediaFile(null); setMediaPreview(null); }}
-                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
-                >×</button>
+            {mediaFiles.length > 0 && (
+              <div className="mb-2">
+                <div className="flex flex-wrap gap-2">
+                  {mediaFiles.map((file, i) => (
+                    <div key={i} className="relative">
+                      {file.type.startsWith('image/') ? (
+                        <img src={mediaPreviews[i]} alt={file.name} className="h-16 w-16 object-cover rounded-lg border border-analog-border" />
+                      ) : (
+                        <div className="h-16 w-16 flex flex-col items-center justify-center rounded-lg border border-analog-border bg-analog-surface-alt p-1">
+                          <svg className="w-5 h-5 text-analog-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <span className="text-[8px] text-analog-text-muted truncate w-full text-center mt-0.5">{file.name}</span>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => {
+                          setMediaFiles(prev => prev.filter((_, j) => j !== i));
+                          setMediaPreviews(prev => prev.filter((_, j) => j !== i));
+                        }}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-analog-text-faint mt-1.5">
+                  {mediaFiles.length} file{mediaFiles.length !== 1 ? 's' : ''} ({formatFileSize(mediaFiles.reduce((s, f) => s + f.size, 0))})
+                  {isWhatsApp && mediaFiles.length > 1 && ' — will be sent as separate messages'}
+                </p>
               </div>
             )}
 
@@ -511,14 +567,23 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={isWhatsApp ? undefined : "image/*"}
+                    multiple
                     className="hidden"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setMediaFile(file);
-                        setMediaPreview(URL.createObjectURL(file));
+                      const files = Array.from(e.target.files || []);
+                      const combined = [...mediaFiles, ...files];
+                      const max = isWhatsApp ? MAX_WHATSAPP_FILES : MAX_SMS_FILES;
+                      if (combined.length > max) {
+                        alert(`Maximum ${max} files allowed.`);
+                        e.target.value = ''; return;
                       }
+                      if (!isWhatsApp) {
+                        const v = validateSmsAttachments(combined);
+                        if (!v.ok) { alert(v.error); e.target.value = ''; return; }
+                      }
+                      setMediaFiles(combined);
+                      setMediaPreviews([...mediaPreviews, ...files.map(f => URL.createObjectURL(f))]);
                       e.target.value = '';
                     }}
                   />
@@ -549,7 +614,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                 </div>
                 <button
                   onClick={handleSend}
-                  disabled={(!newMessage.trim() && !mediaFile && !contentSid) || sending}
+                  disabled={(!newMessage.trim() && mediaFiles.length === 0 && !contentSid) || sending}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-analog-accent hover:bg-analog-accent-hover text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {sending ? (
