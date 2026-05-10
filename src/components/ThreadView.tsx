@@ -138,18 +138,24 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     };
   }, [threadId]);
 
+  const attachmentsRef = useRef(attachments);
+  useEffect(() => { attachmentsRef.current = attachments; }, [attachments]);
+
   useEffect(() => {
     if (!showComposer) return;
-    // Find the contentEditable inside RichTextEditor
+    let cleanupResize: (() => void) | null = null;
+    let cleanupPaste: (() => void) | null = null;
+    let cancelled = false;
     const tryAttach = () => {
+      if (cancelled) return;
       const editor = document.querySelector('[contenteditable="true"]') as HTMLElement | null;
-      if (!editor) { setTimeout(tryAttach, 100); return null; }
-      const cleanupResize = attachImageResizer(editor);
-      const cleanupPaste = attachImagePasteHandler(editor, {
+      if (!editor) { setTimeout(tryAttach, 100); return; }
+      cleanupResize = attachImageResizer(editor);
+      cleanupPaste = attachImagePasteHandler(editor, {
         canAddMore: () => inlineRegistryRef.current.size < MAX_INLINE_IMAGES,
         onTooMany: () => alert(`Maximum ${MAX_INLINE_IMAGES} inline images allowed.`),
         onWouldExceedSize: (bytes) => {
-          const totalAttachBytes = attachments.reduce((s, f) => s + f.size, 0);
+          const totalAttachBytes = attachmentsRef.current.reduce((s: number, f: any) => s + (f.file?.size || 0), 0);
           const inlineBytes = Array.from(inlineRegistryRef.current.values()).reduce((s, m) => s + Math.floor(m.data.length * 0.75), 0);
           if (totalAttachBytes + inlineBytes + bytes > 25 * 1024 * 1024) {
             alert('Adding this image would exceed the 25MB total size limit.');
@@ -162,10 +168,13 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
           setInlineCount(inlineRegistryRef.current.size);
         },
       });
-      return () => { cleanupResize(); cleanupPaste(); };
     };
-    const cleanup = tryAttach();
-    return () => { if (cleanup) cleanup(); };
+    tryAttach();
+    return () => {
+      cancelled = true;
+      if (cleanupResize) cleanupResize();
+      if (cleanupPaste) cleanupPaste();
+    };
   }, [showComposer]);
 
   useEffect(() => {

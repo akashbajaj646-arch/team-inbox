@@ -61,29 +61,44 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const fileInputRef = useRef<HTMLInputElement>(null);
   const smsFileInputRef = useRef<HTMLInputElement>(null);
 
+  const attachmentsRef = useRef<File[]>([]);
+  useEffect(() => { attachmentsRef.current = attachments; }, [attachments]);
+
   useEffect(() => {
-    if (!isEmail || !editorRef.current) return;
-    const editor = editorRef.current;
-    const cleanupResize = attachImageResizer(editor);
-    const cleanupPaste = attachImagePasteHandler(editor, {
-      canAddMore: () => inlineRegistryRef.current.size < MAX_INLINE_IMAGES,
-      onTooMany: () => alert(`Maximum ${MAX_INLINE_IMAGES} inline images allowed.`),
-      onWouldExceedSize: (bytes) => {
-        const totalAttachBytes = attachments.reduce((s, f) => s + f.size, 0);
-        const inlineBytes = Array.from(inlineRegistryRef.current.values()).reduce((s, m) => s + Math.floor(m.data.length * 0.75), 0);
-        if (totalAttachBytes + inlineBytes + bytes > 25 * 1024 * 1024) {
-          alert('Adding this image would exceed the 25MB total size limit.');
-          return true;
-        }
-        return false;
-      },
-      onAdded: (meta) => {
-        inlineRegistryRef.current.set(meta.cid, meta);
-        setInlineCount(inlineRegistryRef.current.size);
-      },
-    });
-    return () => { cleanupResize(); cleanupPaste(); };
-  }, [isEmail, attachments]);
+    if (!isEmail) return;
+    let cleanupResize: (() => void) | null = null;
+    let cleanupPaste: (() => void) | null = null;
+    let cancelled = false;
+    const tryAttach = () => {
+      if (cancelled) return;
+      const editor = editorRef.current;
+      if (!editor) { setTimeout(tryAttach, 100); return; }
+      cleanupResize = attachImageResizer(editor);
+      cleanupPaste = attachImagePasteHandler(editor, {
+        canAddMore: () => inlineRegistryRef.current.size < MAX_INLINE_IMAGES,
+        onTooMany: () => alert(`Maximum ${MAX_INLINE_IMAGES} inline images allowed.`),
+        onWouldExceedSize: (bytes) => {
+          const totalAttachBytes = attachmentsRef.current.reduce((s, f) => s + f.size, 0);
+          const inlineBytes = Array.from(inlineRegistryRef.current.values()).reduce((s, m) => s + Math.floor(m.data.length * 0.75), 0);
+          if (totalAttachBytes + inlineBytes + bytes > 25 * 1024 * 1024) {
+            alert('Adding this image would exceed the 25MB total size limit.');
+            return true;
+          }
+          return false;
+        },
+        onAdded: (meta) => {
+          inlineRegistryRef.current.set(meta.cid, meta);
+          setInlineCount(inlineRegistryRef.current.size);
+        },
+      });
+    };
+    tryAttach();
+    return () => {
+      cancelled = true;
+      if (cleanupResize) cleanupResize();
+      if (cleanupPaste) cleanupPaste();
+    };
+  }, [isEmail]);
 
   function execCmd(command: string, value?: string) {
     editorRef.current?.focus();
