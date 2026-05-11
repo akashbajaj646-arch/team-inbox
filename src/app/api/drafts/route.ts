@@ -11,7 +11,7 @@ export async function GET() {
 
   const { data: drafts, error } = await supabase
     .from('drafts')
-    .select('*, thread:email_threads(id, subject), inbox:inboxes(id, email_address, name)')
+    .select('*')
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
