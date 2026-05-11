@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 
 // GET /api/drafts - list current user's drafts
 export async function GET() {
+  try {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -15,12 +16,20 @@ export async function GET() {
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('Drafts GET error:', error);
+    return NextResponse.json({ error: error.message, details: error }, { status: 500 });
+  }
   return NextResponse.json({ drafts: drafts || [] });
+  } catch (err: any) {
+    console.error('Drafts GET exception:', err);
+    return NextResponse.json({ error: err?.message || 'Unknown error', stack: err?.stack }, { status: 500 });
+  }
 }
 
 // POST /api/drafts - upsert a draft (auto-save)
 export async function POST(request: Request) {
+  try {
   const body = await request.json();
   const { id, draft_type, thread_id, inbox_id, to_address, cc_address, bcc_address, subject, body_html } = body;
 
@@ -84,8 +93,15 @@ export async function POST(request: Request) {
     .insert(payload)
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('Drafts insert error:', error);
+    return NextResponse.json({ error: error.message, details: error }, { status: 500 });
+  }
   return NextResponse.json({ draft });
+  } catch (err: any) {
+    console.error('Drafts POST exception:', err);
+    return NextResponse.json({ error: err?.message || 'Unknown error', stack: err?.stack }, { status: 500 });
+  }
 }
 
 // DELETE /api/drafts?id=xxx
