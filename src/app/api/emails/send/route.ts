@@ -141,19 +141,37 @@ export async function POST(request: Request) {
     if (newMessage) {
       const newBody = extractBody(newMessage);
 
-      await supabase.from('email_messages').insert({
-        thread_id: threadId,
-        gmail_message_id: newMessage.id,
-        from_address: inbox.email_address,
-        from_name: null,
-        to_addresses: [toAddress],
-        cc_addresses: ccAddresses,
-        body_html: newBody.html || body,
-        body_text: newBody.text,
-        sent_at: new Date().toISOString(),
-        is_outbound: true,
-        sent_by_user_id: user.id,
-      });
+      const { data: insertedMessage } = await supabase
+        .from('email_messages')
+        .insert({
+          thread_id: threadId,
+          gmail_message_id: newMessage.id,
+          from_address: inbox.email_address,
+          from_name: null,
+          to_addresses: [toAddress],
+          cc_addresses: ccAddresses,
+          body_html: newBody.html || body,
+          body_text: newBody.text,
+          sent_at: new Date().toISOString(),
+          is_outbound: true,
+          sent_by_user_id: user.id,
+        })
+        .select()
+        .single();
+
+      // Persist outbound attachments so they appear in the thread view
+      if (insertedMessage && attachments.length > 0) {
+        const attachmentRows = attachments.map((a: any) => ({
+          message_id: insertedMessage.id,
+          thread_id: threadId,
+          filename: a.filename,
+          mime_type: a.mimeType,
+          size: Math.floor((a.data?.length || 0) * 0.75),
+          is_inline: a.inline || false,
+          content_id: a.cid || null,
+        }));
+        await supabase.from('email_attachments').insert(attachmentRows);
+      }
 
       // Update thread
       await supabase
