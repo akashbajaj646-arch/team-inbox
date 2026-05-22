@@ -585,17 +585,16 @@ export async function sendNewEmail(
 
     email = lines.join('\r\n');
   } else {
-    const lines = [
+    const headers = [
       `To: ${options.to}`,
       options.cc ? `Cc: ${options.cc}` : '',
       options.bcc ? `Bcc: ${options.bcc}` : '',
       `Subject: ${options.subject}`,
       'MIME-Version: 1.0',
       'Content-Type: text/html; charset=utf-8',
-      '',
-      options.body,
     ].filter(Boolean);
-    email = lines.join('\r\n');
+    // CRITICAL: blank line separates headers from body per RFC 2822
+    email = headers.join('\r\n') + '\r\n\r\n' + options.body;
   }
 
   const response = await gmail.users.messages.send({
