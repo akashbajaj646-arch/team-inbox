@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import {
   listThreads,
+  listHistory,
   getThread,
   parseHeaders,
   parseEmailAddress,
@@ -57,15 +58,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // Sync the latest emails for this inbox (last 10 threads)
-    const { threads: gmailThreads } = await listThreads(
-      inbox.google_refresh_token,
-      { maxResults: 10 }
-    );
+    // Use Gmail history API to sync only threads that changed since last notification
+    let threadIdsToSync: string[] = [];
+    let useFallback = true;
 
-    for (const gmailThreadSummary of gmailThreads) {
-      if (!gmailThreadSummary.id) continue;
-      await syncThread(supabase, inbox.id, inbox, gmailThreadSummary.id);
+    if (inbox.google_history_id) {
+      try {
+        const { threadIds, expired } = await listHistory(
+          inbox.google_refresh_token,
+          inbox.google_history_id
+        );
+        if (!expired) {
+          threadIdsToSync = threadIds;
+          useFallback = false;
+        }
+      } catch (err) {
+        console.error('History list failed, falling back to recent threads:', err);
+      }
+    }
+
+    if (useFallback) {
+      const { threads: gmailThreads } = await listThreads(
+        inbox.google_refresh_token,
+        { maxResults: 10 }
+      );
+      threadIdsToSync = gmailThreads.map((t: any) => t.id).filter(Boolean);
+    }
+
+    for (const changedThreadId of threadIdsToSync) {
+      await syncThread(supabase, inbox.id, inbox, changedThreadId);
     }
 
     // Update the stored historyId

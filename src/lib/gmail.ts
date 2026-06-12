@@ -603,3 +603,38 @@ export async function sendNewEmail(
   });
   return response.data;
 }
+
+// List thread IDs changed since a given historyId (for efficient pubsub sync)
+export async function listHistory(
+  refreshToken: string,
+  startHistoryId: string
+): Promise<{ threadIds: string[]; expired: boolean }> {
+  const gmail = createGmailClient(refreshToken);
+  const threadIds = new Set<string>();
+
+  try {
+    let pageToken: string | undefined = undefined;
+    do {
+      const res: any = await gmail.users.history.list({
+        userId: 'me',
+        startHistoryId,
+        historyTypes: ['messageAdded'],
+        pageToken,
+      });
+
+      for (const h of res.data.history || []) {
+        for (const added of h.messagesAdded || []) {
+          if (added.message?.threadId) threadIds.add(added.message.threadId);
+        }
+      }
+      pageToken = res.data.nextPageToken || undefined;
+    } while (pageToken);
+
+    return { threadIds: Array.from(threadIds), expired: false };
+  } catch (err: any) {
+    if (err?.code === 404 || err?.response?.status === 404) {
+      return { threadIds: [], expired: true };
+    }
+    throw err;
+  }
+}
