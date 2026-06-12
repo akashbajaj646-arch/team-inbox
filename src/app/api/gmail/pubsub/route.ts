@@ -117,7 +117,8 @@ async function syncThread(
         .from('email_messages')
         .select('id')
         .eq('gmail_message_id', message.id)
-        .single();
+        .limit(1)
+        .maybeSingle();
 
       if (!existingMessage) {
         await insertMessage(supabase, existingThread.id, message, inbox.email_address);
@@ -229,7 +230,7 @@ async function insertMessage(
 
   const isOutbound = from.address.toLowerCase() === inboxEmail.toLowerCase();
 
-  const { data: insertedMessage } = await supabase.from('email_messages').insert({
+  const { data: insertedMessage } = await supabase.from('email_messages').upsert({
     thread_id: threadId,
     gmail_message_id: message.id,
     from_address: from.address,
@@ -240,7 +241,7 @@ async function insertMessage(
     body_text: body.text,
     sent_at: new Date(parseInt(message.internalDate)).toISOString(),
     is_outbound: isOutbound,
-  }).select().single();
+  }, { onConflict: 'gmail_message_id', ignoreDuplicates: true }).select().maybeSingle();
 
   // Save attachments
   if (insertedMessage) {

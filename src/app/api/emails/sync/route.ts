@@ -166,7 +166,8 @@ async function syncThread(
         .from('email_messages')
         .select('id')
         .eq('gmail_message_id', message.id)
-        .single();
+        .limit(1)
+        .maybeSingle();
 
       if (!existingMessage) {
         await insertMessage(supabase, existingThread.id, message, inbox.email_address);
@@ -230,7 +231,7 @@ async function insertMessage(
   // Determine if outbound (sent from inbox email)
   const isOutbound = from.address.toLowerCase() === inboxEmail.toLowerCase();
 
-  await supabase.from('email_messages').insert({
+  await supabase.from('email_messages').upsert({
     thread_id: threadId,
     gmail_message_id: message.id,
     from_address: from.address,
@@ -241,5 +242,5 @@ async function insertMessage(
     body_text: body.text,
     sent_at: new Date(parseInt(message.internalDate)).toISOString(),
     is_outbound: isOutbound,
-  });
+  }, { onConflict: 'gmail_message_id', ignoreDuplicates: true });
 }

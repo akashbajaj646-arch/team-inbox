@@ -64,7 +64,8 @@ export async function POST(request: Request) {
             .from('email_messages')
             .select('id')
             .eq('gmail_message_id', message.id)
-            .single();
+            .limit(1)
+            .maybeSingle();
 
           let messageId: string;
 
@@ -110,7 +111,7 @@ export async function POST(request: Request) {
           const toAddresses = (msgHeaders.to || '').split(',').map((addr: string) => parseEmailAddress(addr.trim()).address).filter(Boolean);
           const ccAddresses = (msgHeaders.cc || '').split(',').map((addr: string) => parseEmailAddress(addr.trim()).address).filter(Boolean);
 
-          const { data: insertedMessage } = await serviceSupabase.from('email_messages').insert({
+          const { data: insertedMessage } = await serviceSupabase.from('email_messages').upsert({
             thread_id: threadId,
             gmail_message_id: message.id,
             from_address: from.address,
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
             body_text: body.text,
             sent_at: new Date(parseInt(message.internalDate)).toISOString(),
             is_outbound: from.address.toLowerCase() === inbox.email_address.toLowerCase(),
-          }).select().single();
+          }, { onConflict: 'gmail_message_id', ignoreDuplicates: true }).select().maybeSingle();
 
           messagesCreated++;
 

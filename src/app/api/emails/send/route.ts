@@ -143,7 +143,7 @@ export async function POST(request: Request) {
 
       const { data: insertedMessage } = await supabase
         .from('email_messages')
-        .insert({
+        .upsert({
           thread_id: threadId,
           gmail_message_id: newMessage.id,
           from_address: inbox.email_address,
@@ -155,9 +155,9 @@ export async function POST(request: Request) {
           sent_at: new Date().toISOString(),
           is_outbound: true,
           sent_by_user_id: user.id,
-        })
+        }, { onConflict: 'gmail_message_id', ignoreDuplicates: true })
         .select()
-        .single();
+        .maybeSingle();
 
       // Persist outbound attachments so they appear in the thread view
       if (insertedMessage && attachments.length > 0) {
