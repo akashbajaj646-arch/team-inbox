@@ -87,7 +87,18 @@ export async function getThread(
     format: 'full',
   });
   
-  return response.data as GmailThread;
+  const thread = response.data as GmailThread;
+
+  // Drop Gmail draft revisions — composing in Gmail autosaves many draft
+  // snapshots into the thread, each with its own message id. They are not
+  // real sent/received messages and must never appear in the thread view.
+  if (thread.messages?.length) {
+    thread.messages = thread.messages.filter(
+      (m) => !m.labelIds?.includes('DRAFT')
+    );
+  }
+
+  return thread;
 }
 
 // Parse email headers
