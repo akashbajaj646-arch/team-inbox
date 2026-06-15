@@ -9,13 +9,24 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const supabase = await createServiceClient();
-  const { data: threads, error } = await supabase
-    .from('email_threads')
-    .select('id, gmail_thread_id, inbox_id')
-    .order('last_message_at', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ threads: threads || [], count: (threads || []).length });
+  // Only threads with 2+ outbound messages can carry draft-revision bloat.
+  // Paginate past Supabase's 1000-row cap so nothing is missed.
+  const all: any[] = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('draft_cleanup_candidates')
+      .select('id, gmail_thread_id, inbox_id')
+      .range(from, from + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return NextResponse.json({ threads: all, count: all.length });
 }
 
 // POST { threadId, dryRun? }: reconcile one thread against Gmail truth
