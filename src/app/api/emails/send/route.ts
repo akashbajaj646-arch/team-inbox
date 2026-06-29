@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     // Determine who to reply to — never the inbox itself.
     // Walk newest-first: reply to whoever wrote in (From), or whoever we
     // last wrote to (To/Cc), always excluding this inbox's own address.
-    const extractAddr = (raw) => {
+    const extractAddr = (raw: string) => {
       const m = (raw || '').match(/<([^>]+)>/);
       return (m ? m[1] : (raw || '')).trim();
     };
@@ -111,8 +111,8 @@ export async function POST(request: Request) {
       }
       const candidates = ((h.to || '') + ',' + (h.cc || ''))
         .split(',')
-        .map((a) => extractAddr(a))
-        .filter((a) => a && a.toLowerCase() !== inboxAddr);
+        .map((a: string) => extractAddr(a))
+        .filter((a: string) => a && a.toLowerCase() !== inboxAddr);
       if (candidates.length) { toAddress = candidates[0]; break; }
     }
     if (!toAddress) {
