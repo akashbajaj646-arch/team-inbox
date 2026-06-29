@@ -93,11 +93,34 @@ export async function POST(request: Request) {
     const lastMessage = gmailThread.messages[gmailThread.messages.length - 1];
     const headers = parseHeaders(lastMessage.payload.headers);
 
-    // Determine who to reply to
-    const replyToRaw = headers['reply-to'] || headers.from || '';
-    // Extract email address robustly - handle "Name <email>" and plain "email" formats
-    const angleMatch = replyToRaw.match(/<([^>]+)>/);
-    const toAddress = angleMatch ? angleMatch[1].trim() : replyToRaw.trim();
+    // Determine who to reply to — never the inbox itself.
+    // Walk newest-first: reply to whoever wrote in (From), or whoever we
+    // last wrote to (To/Cc), always excluding this inbox's own address.
+    const extractAddr = (raw) => {
+      const m = (raw || '').match(/<([^>]+)>/);
+      return (m ? m[1] : (raw || '')).trim();
+    };
+    const inboxAddr = inbox.email_address.toLowerCase();
+    let toAddress = '';
+    for (let i = gmailThread.messages.length - 1; i >= 0 && !toAddress; i--) {
+      const h = parseHeaders(gmailThread.messages[i].payload.headers);
+      const fromAddr = extractAddr(h.from).toLowerCase();
+      if (fromAddr && fromAddr !== inboxAddr) {
+        toAddress = extractAddr(h['reply-to'] || h.from);
+        break;
+      }
+      const candidates = ((h.to || '') + ',' + (h.cc || ''))
+        .split(',')
+        .map((a) => extractAddr(a))
+        .filter((a) => a && a.toLowerCase() !== inboxAddr);
+      if (candidates.length) { toAddress = candidates[0]; break; }
+    }
+    if (!toAddress) {
+      return NextResponse.json(
+        { error: 'Could not determine a recipient (no external address in thread)' },
+        { status: 400 }
+      );
+    }
 
     // Build subject (add Re: if not already present)
     let subject = thread.subject;
