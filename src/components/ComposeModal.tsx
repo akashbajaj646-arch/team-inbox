@@ -257,7 +257,8 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 inboxId: inbox.id,
-                to: phone.trim(),
+                toPhone: phone.trim(),
+                channel: isWhatsApp ? 'whatsapp' : 'sms',
                 body: isFirst ? message.trim() : '',  // text only on first message
                 mediaUrls: [mediaUrls[i]],
               }),
@@ -274,7 +275,8 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               inboxId: inbox.id,
-              to: phone.trim(),
+              toPhone: phone.trim(),
+              channel: isWhatsApp ? 'whatsapp' : 'sms',
               body: message.trim(),
               mediaUrls,
             }),
