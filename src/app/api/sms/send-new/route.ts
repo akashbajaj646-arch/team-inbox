@@ -73,8 +73,12 @@ export async function POST(request: Request) {
       body,
     });
 
-    // Find or create thread
-    const cleanPhone = toPhone.replace('whatsapp:', '');
+    // Find or create thread (normalize to E.164: +1XXXXXXXXXX)
+    let cleanPhone = toPhone.replace('whatsapp:', '').replace(/[^\d+]/g, '');
+    const digits = cleanPhone.replace(/\D/g, '');
+    if (digits.length === 10) cleanPhone = `+1${digits}`;
+    else if (digits.length === 11 && digits.startsWith('1')) cleanPhone = `+${digits}`;
+    else if (!cleanPhone.startsWith('+')) cleanPhone = `+${digits}`;
     let { data: thread } = await supabase
       .from('sms_threads')
       .select('*')

@@ -108,6 +108,7 @@ export async function POST(request: Request) {
           last_message_at: new Date().toISOString(),
           last_message_preview: body?.substring(0, 100) || '[Media]',
           is_read: false,
+          deleted_at: null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', thread.id);
