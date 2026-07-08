@@ -80,7 +80,8 @@ export async function POST(request: Request) {
       .select('*')
       .eq('inbox_id', inboxId)
       .eq('contact_phone', cleanPhone)
-      .single();
+      .limit(1)
+      .maybeSingle();
 
     if (!thread) {
       const { data: newThread } = await supabase
