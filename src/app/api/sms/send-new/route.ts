@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 const twilio = require('twilio');
+import { normalizeToGsm } from '@/lib/gsm';
 
 /**
  * Send a new SMS or WhatsApp message to a phone number (creates a new thread).
@@ -67,10 +68,13 @@ export async function POST(request: Request) {
       : toPhone;
 
     // Send via Twilio
+    const safeBody = normalizeToGsm(body);
+
     const twilioMessage = await twilioClient.messages.create({
       from: fromNumber,
       to: toNumber,
-      body,
+      body: safeBody,
+      statusCallback: `${process.env.NEXT_PUBLIC_APP_URL || 'https://team-inbox-khaki.vercel.app'}/api/sms/status`,
     });
 
     // Find or create thread (normalize to E.164: +1XXXXXXXXXX)

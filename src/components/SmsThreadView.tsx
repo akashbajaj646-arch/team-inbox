@@ -460,6 +460,18 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                           </p>
                         </div>
 
+                        {message.direction === 'outbound' &&
+                          (message.status === 'failed' || message.status === 'undelivered') && (
+                          <div className="flex items-center gap-1.5 mt-1 max-w-[75%]">
+                            <svg className="w-4 h-4 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <span className="text-xs text-red-500">
+                              Not delivered{message.error_code ? ` (error ${message.error_code})` : ''}
+                            </span>
+                          </div>
+                        )}
+
                         {message.direction === 'outbound' && message.sent_by && (
                           <div className="flex items-center gap-1.5 mt-1 mr-1">
                             <div

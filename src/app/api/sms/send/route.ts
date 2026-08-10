@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 const twilio = require('twilio');
+import { normalizeToGsm } from '@/lib/gsm';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,6 +70,7 @@ export async function POST(request: Request) {
     const messageOptions: any = {
       from: isWhatsApp ? `whatsapp:${inbox.twilio_phone_number}` : inbox.twilio_phone_number,
       to: isWhatsApp ? `whatsapp:${thread.contact_phone}` : thread.contact_phone,
+      statusCallback: `${process.env.NEXT_PUBLIC_APP_URL || 'https://team-inbox-khaki.vercel.app'}/api/sms/status`,
     };
 
     if (contentSid) {
@@ -76,7 +78,8 @@ export async function POST(request: Request) {
       messageOptions.contentSid = contentSid;
     } else {
       // Send as a freeform message
-      if (body) messageOptions.body = body;
+      const safeBody = body ? normalizeToGsm(body) : body;
+    if (safeBody) messageOptions.body = safeBody;
       if (mediaUrls && mediaUrls.length > 0) messageOptions.mediaUrl = mediaUrls;
     }
 
