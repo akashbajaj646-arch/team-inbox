@@ -192,9 +192,12 @@ export default function ThreadList({
     const stale = () => seq !== loadSeq.current;
     setLoading(true);
 
+    // Sent: inner join so the database returns only threads with an outbound message.
+    // (Previously every thread id was sent in one request, which failed on large inboxes.)
+    const columns: string = activeView === 'sent' ? '*, sent_msgs:email_messages!inner(id)' : '*';
     let query = supabase
       .from('email_threads')
-      .select('*')
+      .select(columns)
       .eq('inbox_id', inbox.id)
       .order('last_message_at', { ascending: false });
 
@@ -209,20 +212,17 @@ export default function ThreadList({
       case 'unread': query = query.eq('is_read', false).is('deleted_at', null).or('is_archived.is.null,is_archived.eq.false'); break;
       case 'starred': query = query.eq('is_starred', true).is('deleted_at', null); break;
       case 'snoozed': query = query.is('deleted_at', null).gt('snoozed_until', new Date().toISOString()); break;
-      case 'sent': query = query.is('deleted_at', null); break;
+      case 'sent': query = query.is('deleted_at', null).eq('sent_msgs.is_outbound', true); break;
       case 'all': query = query.is('deleted_at', null); break;
       case 'trash': query = query.not('deleted_at', 'is', null); break;
     }
 
-    const { data } = await query;
+    const { data: raw } = await query;
+    const data = raw as unknown as EmailThread[] | null;
     if (stale()) return;
 
     if (activeView === 'sent' && data) {
-      const threadIds = data.map(t => t.id);
-      const { data: sentMessages } = await supabase.from('email_messages').select('thread_id').in('thread_id', threadIds).eq('is_outbound', true);
-      if (stale()) return;
-      const sentThreadIds = new Set(sentMessages?.map(m => m.thread_id) || []);
-      const filteredData = data.filter(t => sentThreadIds.has(t.id));
+      const filteredData = (data as any[]).map(({ sent_msgs, ...t }) => t) as EmailThread[];
       if (filteredInbox && filteredInbox.filters.length > 0) {
         await applyFilteredInboxFilters(filteredData, stale);
       } else {
