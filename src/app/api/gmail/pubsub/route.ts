@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { routeThread } from '@/lib/filter-routing';
 import { createServiceClient } from '@/lib/supabase/server';
 import {
   listThreads,
@@ -134,6 +135,7 @@ async function syncThread(
       })
       .eq('id', existingThread.id);
 
+    let addedMessage = false;
     for (const message of gmailThread.messages) {
       const { data: existingMessage } = await supabase
         .from('email_messages')
@@ -144,8 +146,11 @@ async function syncThread(
 
       if (!existingMessage) {
         await insertMessage(supabase, existingThread.id, message, inbox.email_address);
+        addedMessage = true;
       }
     }
+    // Threads that existed before a filter was created get routed on their next message
+    if (addedMessage) await routeThread(supabase, inboxId, existingThread.id);
   } else {
     const { data: newThread } = await supabase
       .from('email_threads')
@@ -165,67 +170,8 @@ async function syncThread(
       for (const message of gmailThread.messages) {
         await insertMessage(supabase, newThread.id, message, inbox.email_address);
       }
-      // Auto-apply filters to new thread
-      await applyFiltersToThread(supabase, inboxId, newThread.id, newThread.subject);
-    }
-  }
-}
-
-async function applyFiltersToThread(
-  supabase: any,
-  inboxId: string,
-  threadId: string,
-  subject: string
-) {
-  // Load all filters for this inbox
-  const { data: filteredInboxes } = await supabase
-    .from('filtered_inboxes')
-    .select('*')
-    .eq('inbox_id', inboxId);
-
-  if (!filteredInboxes?.length) return;
-
-  // Load messages for this thread to check from/body
-  const { data: messages } = await supabase
-    .from('email_messages')
-    .select('from_address, from_name, body_text')
-    .eq('thread_id', threadId);
-
-  if (!messages?.length) return;
-
-  function matchesFilter(filter: any): boolean {
-    const val = filter.value.toLowerCase();
-    const check = (str: string) => {
-      str = (str || '').toLowerCase();
-      switch (filter.operator) {
-        case 'contains': return str.includes(val);
-        case 'equals': return str === val;
-        case 'starts_with': return str.startsWith(val);
-        case 'ends_with': return str.endsWith(val);
-        default: return false;
-      }
-    };
-    switch (filter.field) {
-      case 'from': return messages.some((m: any) => check(m.from_address) || check(m.from_name));
-      case 'subject': return check(subject || '');
-      case 'body': return messages.some((m: any) => check(m.body_text || ''));
-      default: return false;
-    }
-  }
-
-  for (const fi of filteredInboxes) {
-    const filters: any[] = fi.filters;
-    const logic: string = fi.filter_logic;
-    const matches = logic === 'all'
-      ? filters.every(matchesFilter)
-      : filters.some(matchesFilter);
-
-    if (matches) {
-      await supabase
-        .from('email_threads')
-        .update({ filtered_inbox_id: fi.id })
-        .eq('id', threadId);
-      break; // Assign to first matching filter only
+      // Route into a filtered inbox (e.g. Stripe) if its rules match
+      await routeThread(supabase, inboxId, newThread.id);
     }
   }
 }

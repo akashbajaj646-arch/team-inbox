@@ -7,6 +7,7 @@ import {
   parseEmailAddress,
   extractBody,
 } from '@/lib/gmail';
+import { routeThread } from '@/lib/filter-routing';
 
 export async function POST(request: Request) {
   try {
@@ -162,6 +163,7 @@ async function syncThread(
       .eq('id', existingThread.id);
 
     // Sync any new messages
+    let addedMessage = false;
     for (const message of gmailThread.messages) {
       const { data: existingMessage } = await supabase
         .from('email_messages')
@@ -172,8 +174,10 @@ async function syncThread(
 
       if (!existingMessage) {
         await insertMessage(supabase, existingThread.id, message, inbox.email_address);
+        addedMessage = true;
       }
     }
+    if (addedMessage) await routeThread(supabase, inboxId, existingThread.id);
     return false; // Not a new thread
   } else {
     // Create new thread
@@ -202,6 +206,7 @@ async function syncThread(
     for (const message of gmailThread.messages) {
       await insertMessage(supabase, newThread.id, message, inbox.email_address);
     }
+    await routeThread(supabase, inboxId, newThread.id);
 
     return true; // New thread synced
   }

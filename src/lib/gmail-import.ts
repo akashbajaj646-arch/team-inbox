@@ -1,4 +1,5 @@
 import { getThread, parseHeaders, parseEmailAddress, extractBody, extractAttachments } from '@/lib/gmail';
+import { routeThread } from '@/lib/filter-routing';
 
 /**
  * Imports one Gmail thread (thread row, messages, attachments) into Supabase if missing.
@@ -89,5 +90,6 @@ export async function importGmailThread(
       for (const row of rows) await svc.from('email_attachments').insert(row);
     }
   }
+  await routeThread(svc, inbox.id, threadId);
   return threadId;
 }

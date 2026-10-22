@@ -242,36 +242,15 @@ export default function ThreadList({
   }
   loadThreadsRef.current = loadThreads;
 
+  // Threads are routed into a filtered inbox on the server (filtered_inbox_id), so the
+  // tag alone decides membership. Re-checking rules here used to request every message
+  // at once, which failed on large folders and left them empty.
   async function applyFilteredInboxFilters(threadsToFilter: EmailThread[], stale: () => boolean = () => false) {
-    if (!filteredInbox || threadsToFilter.length === 0) {
-      setThreads(threadsToFilter);
-      setDisplayedThreads(threadsToFilter);
-      loadContactNames(threadsToFilter);
-      return;
-    }
-
-    const threadIds = threadsToFilter.map(t => t.id);
-    const { data: messages } = await supabase.from('email_messages').select('thread_id, from_address, from_name, body_text, body_html').in('thread_id', threadIds);
     if (stale()) return;
-    const messagesByThread: Record<string, any[]> = {};
-    (messages || []).forEach(m => {
-      if (!messagesByThread[m.thread_id]) messagesByThread[m.thread_id] = [];
-      messagesByThread[m.thread_id].push(m);
-    });
-
-    const matchingThreads = threadsToFilter.filter(thread => {
-      const threadMessages = messagesByThread[thread.id] || [];
-      if (filteredInbox.filter_logic === 'all') {
-        return filteredInbox.filters.every(filter => matchesFilter(thread, threadMessages, filter));
-      } else {
-        return filteredInbox.filters.some(filter => matchesFilter(thread, threadMessages, filter));
-      }
-    });
-
-    setThreads(matchingThreads);
-    setDisplayedThreads(matchingThreads);
-    loadContactNames(matchingThreads);
-    loadThreadAttachments(matchingThreads);
+    setThreads(threadsToFilter);
+    setDisplayedThreads(threadsToFilter);
+    loadContactNames(threadsToFilter);
+    loadThreadAttachments(threadsToFilter);
   }
 
   async function loadContactNames(threadsList: EmailThread[]) {

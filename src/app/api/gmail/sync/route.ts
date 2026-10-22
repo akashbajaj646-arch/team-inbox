@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { listThreads, getThread, parseHeaders, parseEmailAddress, extractBody, extractAttachments } from '@/lib/gmail';
+import { routeThread } from '@/lib/filter-routing';
 
 export const maxDuration = 60;
 
@@ -22,6 +23,8 @@ export async function POST(request: Request) {
 
     const { threads: gmailThreads } = await listThreads(inbox.google_refresh_token, { maxResults });
     let threadsCreated = 0, messagesCreated = 0, threadsUpdated = 0, attachmentsSaved = 0;
+    const { count: filterCount } = await serviceSupabase.from('filtered_inboxes').select('id', { count: 'exact', head: true }).eq('inbox_id', inboxId);
+    const hasFilters = (filterCount || 0) > 0;
 
     for (const gmailThreadSummary of gmailThreads) {
       if (!gmailThreadSummary.id) continue;
@@ -146,6 +149,7 @@ export async function POST(request: Request) {
             }
           }
         }
+        if (hasFilters) await routeThread(serviceSupabase, inboxId, threadId);
       } catch (err) { continue; }
     }
 
