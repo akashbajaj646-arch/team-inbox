@@ -192,12 +192,9 @@ export default function ThreadList({
     const stale = () => seq !== loadSeq.current;
     setLoading(true);
 
-    // Sent: inner join so the database returns only threads with an outbound message.
-    // (Previously every thread id was sent in one request, which failed on large inboxes.)
-    const columns: string = activeView === 'sent' ? '*, sent_msgs:email_messages!inner(id)' : '*';
     let query = supabase
       .from('email_threads')
-      .select(columns)
+      .select('*')
       .eq('inbox_id', inbox.id)
       .order('last_message_at', { ascending: false });
 
@@ -212,17 +209,27 @@ export default function ThreadList({
       case 'unread': query = query.eq('is_read', false).is('deleted_at', null).or('is_archived.is.null,is_archived.eq.false'); break;
       case 'starred': query = query.eq('is_starred', true).is('deleted_at', null); break;
       case 'snoozed': query = query.is('deleted_at', null).gt('snoozed_until', new Date().toISOString()); break;
-      case 'sent': query = query.is('deleted_at', null).eq('sent_msgs.is_outbound', true); break;
+      case 'sent': query = query.is('deleted_at', null); break;
       case 'all': query = query.is('deleted_at', null); break;
       case 'trash': query = query.not('deleted_at', 'is', null); break;
     }
 
-    const { data: raw } = await query;
-    const data = raw as unknown as EmailThread[] | null;
+    const { data } = await query;
     if (stale()) return;
 
     if (activeView === 'sent' && data) {
-      const filteredData = (data as any[]).map(({ sent_msgs, ...t }) => t) as EmailThread[];
+      // Find threads with an outbound message, 100 thread ids per request so URLs stay short.
+      // (One request with every id failed on large inboxes and showed Sent as empty.)
+      const ids = data.map((t) => t.id);
+      const chunks: string[][] = [];
+      for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+      const results = await Promise.all(
+        chunks.map((c) => supabase.from('email_messages').select('thread_id').in('thread_id', c).eq('is_outbound', true))
+      );
+      if (stale()) return;
+      const sentThreadIds = new Set<string>();
+      results.forEach((r) => (r.data || []).forEach((m: { thread_id: string }) => sentThreadIds.add(m.thread_id)));
+      const filteredData = data.filter((t) => sentThreadIds.has(t.id));
       if (filteredInbox && filteredInbox.filters.length > 0) {
         await applyFilteredInboxFilters(filteredData, stale);
       } else {
