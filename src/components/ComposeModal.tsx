@@ -64,17 +64,20 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
     setDraftLoaded(true);
   }, [isEmail, inbox.id]);
 
-  // Auto-save draft
+  // Auto-save draft. Refs avoid stale ids and stop saving once a send has started.
+  const draftIdRef = useRef<string | null>(null);
+  useEffect(() => { draftIdRef.current = draftId; }, [draftId]);
+  const sendStartedRef = useRef(false);
   const { flush: flushDraft } = useAutoSave({
     data: { to, cc, subject, draftLoaded },
-    shouldSave: () => isEmail && draftLoaded && (to.trim() !== '' || subject.trim() !== '' || (editorRef.current?.innerText.trim() || '') !== ''),
+    shouldSave: () => isEmail && draftLoaded && !sendStartedRef.current && (to.trim() !== '' || subject.trim() !== '' || (editorRef.current?.innerText.trim() || '') !== ''),
     save: async () => {
       const body_html = editorRef.current?.innerHTML || '';
       const res = await fetch('/api/drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: draftId,
+          id: draftIdRef.current,
           draft_type: 'new',
           inbox_id: inbox.id,
           to_address: to,
@@ -85,7 +88,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.draft?.id && !draftId) setDraftId(data.draft.id);
+        if (data.draft?.id && !draftIdRef.current) { draftIdRef.current = data.draft.id; setDraftId(data.draft.id); }
       }
     },
   });
@@ -170,7 +173,14 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
     }
   }
 
+  const sendGuardRef = useRef(false);
   async function handleSend() {
+    if (sendGuardRef.current) return;
+    sendGuardRef.current = true;
+    try { await handleSendInner(); } finally { sendGuardRef.current = false; }
+  }
+
+  async function handleSendInner() {
     setError(null);
     setSending(true);
     try {
@@ -204,7 +214,11 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           ...regularAttachments,
           ...inlineImages.map(img => ({ ...img, inline: true })),
         ];
+        // Persist the latest content, then stop autosaving; the server deletes this draft after sending
+        await flushDraft();
+        sendStartedRef.current = true;
         const payload = JSON.stringify({
+          draftId: draftIdRef.current || undefined,
           inboxId: inbox.id,
           to: to.trim(),
           cc: cc.trim() || undefined,
@@ -213,14 +227,21 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           attachments: allAttachments,
           isNew: true,
         });
-        const sentDraftId = draftId;
+        const sentDraftId = draftIdRef.current;
         // Hide the window for 5s with an Undo; it stays mounted so Undo restores everything
         setPendingSend(true);
         setSending(false);
         runWithUndo({
           message: 'Sending...',
           delayMs: 5000,
-          onUndo: () => { setPendingSend(false); showToast({ message: 'Sending undone', duration: 3000 }); },
+          onUndo: () => { sendStartedRef.current = false; setPendingSend(false); showToast({ message: 'Sending undone', duration: 3000 }); },
+          onUnload: () => {
+            if (payload.length > 60000) return false;
+            try {
+              fetch('/api/emails/send-new', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+              return true;
+            } catch { return false; }
+          },
           run: async () => {
             try {
               const res = await fetch('/api/emails/send-new', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
@@ -233,6 +254,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
               onSent?.();
               onClose();
             } catch (err: any) {
+              sendStartedRef.current = false;
               setPendingSend(false);
               setError(err.message || 'Failed to send');
               showToast({ message: `Send failed: ${err.message || 'unknown error'}`, tone: 'error', duration: 8000 });

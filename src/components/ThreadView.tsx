@@ -362,6 +362,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const initialBodyRef = useRef<string>('');
   const lastMessageIdRef = useRef<string | null>(null);
   const activeThreadRef = useRef(threadId);
+  const sendingRef = useRef(false);
   useEffect(() => {
     activeThreadRef.current = threadId;
     return () => { activeThreadRef.current = ''; };
@@ -587,7 +588,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       const seenPart = new Set<string>();
       data.forEach((att: EmailAttachment & { content_id?: string | null }) => {
         // Older rows were sometimes saved twice; show each part once
-        const partKey = `${att.message_id}|${att.filename}|${att.content_id || ''}`;
+        const partKey = `${att.message_id}|${att.filename}|${att.content_id || ''}|${att.mime_type || ''}|${att.size ?? ''}`;
         if (seenPart.has(partKey)) return;
         seenPart.add(partKey);
         if (att.content_id) {
@@ -708,6 +709,9 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
   async function handleSend() {
     if (!replyBody.trim() || replyBody === '<p></p>') return;
+    // Guard against a second Cmd+Enter while attachments are still being read
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     setSending(true);
 
     let payload: string;
@@ -728,6 +732,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       });
     } catch (err) {
       console.error('Send prep error:', err);
+      sendingRef.current = false;
       setSending(false);
       showToast({ message: 'Could not read an attachment. Nothing was sent.', tone: 'error' });
       return;
@@ -737,6 +742,20 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     const snap = { body: replyBody, cc: ccField, bcc: bccField, showCcBcc, attachments, mode: replyMode, draftId };
     const sendThreadId = threadId;
 
+    // Save the text as a draft first, so nothing is lost if the page closes during the undo window.
+    // The send route deletes this draft once the reply is out.
+    try {
+      const dr = await fetch('/api/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: snap.draftId, draft_type: 'reply', thread_id: sendThreadId, cc_address: snap.cc, bcc_address: snap.bcc, body_html: snap.body }),
+      });
+      if (dr.ok) {
+        const d = await dr.json();
+        if (d.draft?.id) snap.draftId = d.draft.id;
+      }
+    } catch { /* still send; worst case there is no backup draft */ }
+
     setReplyBody('');
     setAttachments([]);
     setCcField('');
@@ -744,6 +763,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     setShowCcBcc(false);
     setShowComposer(false);
     initialBodyRef.current = '';
+    sendingRef.current = false;
     setSending(false);
 
     const restore = async () => {
@@ -768,6 +788,15 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     runWithUndo({
       message: 'Sending...',
       delayMs: 5000,
+      // Page closing mid-window: send now if the request is small enough for keepalive (64KB limit);
+      // otherwise the browser asks first, and the draft saved above keeps the text.
+      onUnload: () => {
+        if (payload.length > 60000) return false;
+        try {
+          fetch('/api/emails/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+          return true;
+        } catch { return false; }
+      },
       onUndo: () => {
         void restore();
         showToast({ message: 'Sending undone', duration: 3000 });

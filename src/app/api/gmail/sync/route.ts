@@ -42,6 +42,7 @@ export async function POST(request: Request) {
             snippet: lastMessage.snippet,
             last_message_at: new Date(parseInt(lastMessage.internalDate)).toISOString(),
             is_read: !lastMessage.labelIds?.includes('UNREAD'),
+            is_archived: !gmailThread.messages.some((m: any) => m.labelIds?.includes('INBOX')),
           }).eq('id', threadId);
           threadsUpdated++;
         } else {
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
             snippet: lastMessage.snippet,
             last_message_at: new Date(parseInt(lastMessage.internalDate)).toISOString(),
             is_read: !lastMessage.labelIds?.includes('UNREAD'),
-            is_archived: !lastMessage.labelIds?.includes('INBOX'),
+            is_archived: !gmailThread.messages.some((m: any) => m.labelIds?.includes('INBOX')),
           }).select().single();
           if (!newThread) continue;
           threadId = newThread.id;

@@ -229,6 +229,9 @@ export async function POST(request: Request) {
       .eq('thread_id', threadId)
       .eq('user_id', user.id);
 
+    // The reply is out: drop this user's saved reply draft for the thread
+    await supabase.from('drafts').delete().eq('thread_id', threadId).eq('user_id', user.id).eq('draft_type', 'reply');
+
     return NextResponse.json({ success: true, messageId: sentMessage.id });
   } catch (err) {
     console.error('Send error:', err);

@@ -17,7 +17,7 @@ function createGmailClient(refreshToken: string) {
 
 export async function POST(request: Request) {
   try {
-    const { inboxId, to, cc, bcc, subject, body, attachments = [] } = await request.json();
+    const { inboxId, to, cc, bcc, subject, body, attachments = [], draftId } = await request.json();
 
     if (!inboxId || !to || !subject || !body) {
       return NextResponse.json(
@@ -98,6 +98,10 @@ export async function POST(request: Request) {
           });
         }
       }
+    }
+
+    if (draftId) {
+      await supabase.from('drafts').delete().eq('id', draftId).eq('user_id', user.id);
     }
 
     return NextResponse.json({ success: true, messageId: sentMessage.id });

@@ -65,6 +65,16 @@ export default function ThreadList({
 
   useEffect(() => { setSelected(new Set()); setHiddenIds(new Set()); setThreads([]); setDisplayedThreads([]); }, [inbox.id, filteredInbox?.id, activeView]);
 
+  useEffect(() => {
+    if (!inbox.google_refresh_token) return;
+    const key = `ti.reconciled.${inbox.id}`;
+    try { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, '1'); } catch { /* ignore */ }
+    fetch('/api/emails/reconcile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inboxId: inbox.id }) })
+      .then((r) => r.json())
+      .then((d) => { if (d?.unarchived || d?.archived) loadThreadsRef.current(); })
+      .catch(() => {});
+  }, [inbox.id, inbox.google_refresh_token]);
+
   // Re-evaluate snoozes every 30s so threads reappear on time
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -174,7 +184,12 @@ export default function ThreadList({
     }
   }
 
+  const loadSeq = useRef(0);
+  const loadThreadsRef = useRef<() => Promise<void>>(async () => {});
+
   async function loadThreads() {
+    const seq = ++loadSeq.current;
+    const stale = () => seq !== loadSeq.current;
     setLoading(true);
 
     let query = supabase
@@ -200,31 +215,34 @@ export default function ThreadList({
     }
 
     const { data } = await query;
+    if (stale()) return;
 
     if (activeView === 'sent' && data) {
       const threadIds = data.map(t => t.id);
       const { data: sentMessages } = await supabase.from('email_messages').select('thread_id').in('thread_id', threadIds).eq('is_outbound', true);
+      if (stale()) return;
       const sentThreadIds = new Set(sentMessages?.map(m => m.thread_id) || []);
       const filteredData = data.filter(t => sentThreadIds.has(t.id));
       if (filteredInbox && filteredInbox.filters.length > 0) {
-        await applyFilteredInboxFilters(filteredData);
+        await applyFilteredInboxFilters(filteredData, stale);
       } else {
         setThreads(filteredData);
         setDisplayedThreads(filteredData);
         loadContactNames(filteredData);
       }
     } else if (filteredInbox && filteredInbox.filters.length > 0 && data) {
-      await applyFilteredInboxFilters(data);
+      await applyFilteredInboxFilters(data, stale);
     } else {
       setThreads(data || []);
       setDisplayedThreads(data || []);
       loadContactNames(data || []);
     }
 
-    setLoading(false);
+    if (!stale()) setLoading(false);
   }
+  loadThreadsRef.current = loadThreads;
 
-  async function applyFilteredInboxFilters(threadsToFilter: EmailThread[]) {
+  async function applyFilteredInboxFilters(threadsToFilter: EmailThread[], stale: () => boolean = () => false) {
     if (!filteredInbox || threadsToFilter.length === 0) {
       setThreads(threadsToFilter);
       setDisplayedThreads(threadsToFilter);
@@ -234,6 +252,7 @@ export default function ThreadList({
 
     const threadIds = threadsToFilter.map(t => t.id);
     const { data: messages } = await supabase.from('email_messages').select('thread_id, from_address, from_name, body_text, body_html').in('thread_id', threadIds);
+    if (stale()) return;
     const messagesByThread: Record<string, any[]> = {};
     (messages || []).forEach(m => {
       if (!messagesByThread[m.thread_id]) messagesByThread[m.thread_id] = [];
@@ -398,11 +417,11 @@ export default function ThreadList({
     const unhide = () => setHiddenIds((prev) => { const n = new Set(prev); ids.forEach((id) => n.delete(id)); return n; });
     if (!ok) {
       unhide();
-      loadThreads();
+      loadThreadsRef.current();
       showToast({ message: 'That did not work. Please try again.', tone: 'error' });
       return;
     }
-    await loadThreads();
+    await loadThreadsRef.current();
     unhide();
 
     const reverse = UNDO[action];
@@ -411,7 +430,7 @@ export default function ThreadList({
       const noun = ids.length === 1 ? 'Conversation' : `${ids.length} conversations`;
       doWithUndo({
         message: `${noun} ${label.toLowerCase()}`,
-        undo: async () => { await threadAction(ids, reverse); loadThreads(); },
+        undo: async () => { await threadAction(ids, reverse); loadThreadsRef.current(); },
       });
     }
   }

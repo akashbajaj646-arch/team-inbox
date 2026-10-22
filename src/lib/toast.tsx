@@ -14,12 +14,34 @@ export interface Toast {
   actionLabel?: string;
   onAction?: () => void;
   tone?: 'default' | 'error';
+  /** Pinned toasts (pending sends) are never pushed off screen by newer ones. */
+  pinned?: boolean;
 }
 
 let toasts: Toast[] = [];
 let nextId = 1;
 const listeners = new Set<(t: Toast[]) => void>();
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
+/** Pending undoable actions that must not be lost if the page unloads. */
+const pendingOnUnload = new Map<number, () => boolean>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', (e) => {
+    let unhandled = false;
+    pendingOnUnload.forEach((handle) => { if (!handle()) unhandled = true; });
+    if (unhandled) {
+      // Ask the browser to confirm leaving; the content is already saved as a draft
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+}
+
+function push(t: Toast) {
+  const pinned = toasts.filter((x) => x.pinned);
+  const rest = toasts.filter((x) => !x.pinned);
+  toasts = [...pinned, ...rest.slice(-Math.max(0, 2 - pinned.length)), t];
+}
 
 function emit() {
   listeners.forEach((l) => l([...toasts]));
@@ -36,8 +58,7 @@ export function dismissToast(id: number) {
 export function showToast(opts: Omit<Toast, 'id'> & { duration?: number }): number {
   const id = nextId++;
   const { duration = 5000, ...rest } = opts;
-  // Keep at most 3 on screen
-  toasts = [...toasts.slice(-2), { id, ...rest }];
+  push({ id, ...rest });
   emit();
   timers.set(id, setTimeout(() => dismissToast(id), duration));
   return id;
@@ -52,30 +73,41 @@ export function runWithUndo(opts: {
   delayMs?: number;
   run: () => void | Promise<void>;
   onUndo: () => void;
+  /**
+   * Called if the page is closing before `run` fired. Return true if it was
+   * handled (e.g. sent with fetch keepalive); false makes the browser ask first.
+   */
+  onUnload?: () => boolean;
 }) {
   const { delayMs = 5000 } = opts;
   let done = false;
   const id = nextId++;
+  const finish = () => { done = true; pendingOnUnload.delete(id); dismissToast(id); };
   const fire = () => {
     if (done) return;
-    done = true;
-    dismissToast(id);
+    finish();
     void opts.run();
   };
-  toasts = [
-    ...toasts.slice(-2),
-    {
-      id,
-      message: opts.message,
-      actionLabel: 'Undo',
-      onAction: () => {
-        if (done) return;
-        done = true;
-        dismissToast(id);
-        opts.onUndo();
-      },
+  if (opts.onUnload) {
+    const onUnload = opts.onUnload;
+    pendingOnUnload.set(id, () => {
+      if (done) return true;
+      const handled = onUnload();
+      if (handled) finish();
+      return handled;
+    });
+  }
+  push({
+    id,
+    pinned: true,
+    message: opts.message,
+    actionLabel: 'Undo',
+    onAction: () => {
+      if (done) return;
+      finish();
+      opts.onUndo();
     },
-  ];
+  });
   emit();
   timers.set(id, setTimeout(fire, delayMs));
 }

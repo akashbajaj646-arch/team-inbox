@@ -157,6 +157,7 @@ async function syncThread(
           parseInt(lastMessage.internalDate)
         ).toISOString(),
         is_read: !lastMessage.labelIds?.includes('UNREAD'),
+        is_archived: !gmailThread.messages.some((m: any) => m.labelIds?.includes('INBOX')),
       })
       .eq('id', existingThread.id);
 
@@ -187,7 +188,7 @@ async function syncThread(
           parseInt(lastMessage.internalDate)
         ).toISOString(),
         is_read: !lastMessage.labelIds?.includes('UNREAD'),
-        is_archived: !lastMessage.labelIds?.includes('INBOX'),
+        is_archived: !gmailThread.messages.some((m: any) => m.labelIds?.includes('INBOX')),
       })
       .select()
       .single();

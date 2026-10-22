@@ -55,8 +55,7 @@ export async function POST(request: Request) {
         if (!until || isNaN(new Date(until).getTime())) {
           return NextResponse.json({ error: 'until required for snooze' }, { status: 400 });
         }
-        // Comes back unread so it stands out when it reappears
-        update = { snoozed_until: new Date(until).toISOString(), is_read: false };
+        update = { snoozed_until: new Date(until).toISOString() };
         break;
       }
       case 'unsnooze': update = { snoozed_until: null }; break;
