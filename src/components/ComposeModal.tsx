@@ -97,7 +97,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
         .select('email_signature')
         .eq('id', currentUser.id)
         .single();
-      if (data?.email_signature && editorRef.current) {
+      if (data?.email_signature && editorRef.current && !(editorRef.current.innerText || '').trim()) {
         editorRef.current.innerHTML = `<p><br></p><p>--</p>${data.email_signature}`;
         // Place cursor at top
         const range = document.createRange();
