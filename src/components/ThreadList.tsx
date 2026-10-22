@@ -551,7 +551,7 @@ export default function ThreadList({
                       {thread.subject || '(No subject)'}
                     </div>
                     <div className="truncate text-[13px] leading-5 text-[#5f6368]">
-                      {thread.snippet}
+                      {decodeEntities(thread.snippet || '')}
                     </div>
                   </div>
                 </div>
@@ -563,4 +563,16 @@ export default function ThreadList({
       </div>
     </div>
   );
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');
 }

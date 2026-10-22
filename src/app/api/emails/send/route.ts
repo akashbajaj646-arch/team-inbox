@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
-import { sendReply, getThread, parseHeaders, extractBody, parseEmailAddress } from '@/lib/gmail';
+import { sendReply, getThread, parseHeaders, extractBody, parseEmailAddress, extractAttachments } from '@/lib/gmail';
 
 export const dynamic = 'force-dynamic';
 
@@ -184,15 +184,24 @@ export async function POST(request: Request) {
 
       // Persist outbound attachments so they appear in the thread view
       if (insertedMessage && attachments.length > 0) {
-        const attachmentRows = attachments.map((a: any) => ({
-          message_id: insertedMessage.id,
-          thread_id: threadId,
-          filename: a.filename,
-          mime_type: a.mimeType,
-          size: Math.floor((a.data?.length || 0) * 0.75),
-          is_inline: a.inline || false,
-          content_id: a.cid || null,
-        }));
+        const gmailParts = extractAttachments(newMessage);
+        const used = new Set<string>();
+        const attachmentRows = attachments.map((a: any) => {
+          const match =
+            gmailParts.find((g) => !used.has(g.attachmentId) && a.cid && g.contentId === a.cid) ||
+            gmailParts.find((g) => !used.has(g.attachmentId) && g.filename === a.filename);
+          if (match) used.add(match.attachmentId);
+          return {
+            message_id: insertedMessage.id,
+            thread_id: threadId,
+            filename: a.filename,
+            mime_type: a.mimeType,
+            size: Math.floor((a.data?.length || 0) * 0.75),
+            is_inline: a.inline || false,
+            content_id: a.cid || null,
+            gmail_attachment_id: match?.attachmentId || null,
+          };
+        });
         await supabase.from('email_attachments').insert(attachmentRows);
       }
 

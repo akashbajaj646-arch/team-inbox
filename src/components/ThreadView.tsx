@@ -148,7 +148,8 @@ function escapeHtml(s: string): string {
 /* ------------------------------------------------------------------ */
 
 const IFRAME_BASE_STYLE = `
-  html,body{margin:0;padding:0;background:#fff;}
+  html,body{margin:0;padding:0;background:#fff;height:auto !important;min-height:0 !important;}
+  body{display:flow-root;}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.55;color:#202124;word-wrap:break-word;overflow-wrap:anywhere;}
   img{max-width:100%;height:auto;}
   table{max-width:100% !important;}
@@ -191,17 +192,23 @@ function hideQuoted(doc: Document): number {
   return hidden;
 }
 
-function EmailBody({ html, text }: { html: string | null; text: string | null }) {
+function EmailBody({ html, text, cidMap }: { html: string | null; text: string | null; cidMap?: Record<string, string> }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [hasQuote, setHasQuote] = useState(false);
   const [showQuote, setShowQuote] = useState(false);
 
   const source = useMemo(() => {
-    if (html) return html;
+    if (html) {
+      // Inline images reference attachments by Content-ID; point them at our attachment proxy
+      return html.replace(/(src\s*=\s*["'])cid:([^"']+)(["'])/gi, (m, pre, cid, post) => {
+        const id = cidMap?.[cid.trim().toLowerCase()];
+        return id ? `${pre}/api/gmail/attachment?id=${id}&inline=1${post}` : m;
+      });
+    }
     // Plain text: render inside the iframe too so links and quotes look consistent
     const escaped = escapeHtml(text || '').replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
     return `<div style="white-space:pre-wrap">${escaped}</div>`;
-  }, [html, text]);
+  }, [html, text, cidMap]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -218,9 +225,10 @@ function EmailBody({ html, text }: { html: string | null; text: string | null })
     setShowQuote(false);
 
     const resize = () => {
-      if (!iframe || !doc.documentElement) return;
-      const h = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0);
-      iframe.style.height = h + 'px';
+      if (!iframe || !doc.body) return;
+      // Measure the content itself; documentElement.scrollHeight never shrinks below the iframe's own height
+      const h = Math.ceil(doc.body.getBoundingClientRect().height);
+      iframe.style.height = Math.max(h, 20) + 'px';
     };
     resize();
     let ro: ResizeObserver | null = null;
@@ -340,6 +348,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [customerLinkedName, setCustomerLinkedName] = useState<string | null>(null);
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
   const [messageAttachments, setMessageAttachments] = useState<Record<string, EmailAttachment[]>>({});
+  const [messageCids, setMessageCids] = useState<Record<string, Record<string, string>>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -559,18 +568,23 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     if (messageIds.length === 0) return;
     const { data } = await supabase
       .from('email_attachments')
-      .select('id, message_id, filename, mime_type, size, is_inline')
+      .select('id, message_id, filename, mime_type, size, is_inline, content_id')
       .in('message_id', messageIds)
-      .eq('is_inline', false)
       .order('filename', { ascending: true });
 
     if (data) {
       const byMessage: Record<string, EmailAttachment[]> = {};
-      data.forEach((att: EmailAttachment) => {
+      const cids: Record<string, Record<string, string>> = {};
+      data.forEach((att: EmailAttachment & { content_id?: string | null }) => {
+        if (att.content_id) {
+          (cids[att.message_id] ||= {})[att.content_id.trim().toLowerCase()] = att.id;
+        }
+        if (att.is_inline) return;
         if (!byMessage[att.message_id]) byMessage[att.message_id] = [];
         byMessage[att.message_id].push(att);
       });
       setMessageAttachments(byMessage);
+      setMessageCids(cids);
     }
   }
 
@@ -1117,7 +1131,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
                     {/* Body */}
                     <div className="pl-[52px] pt-3">
-                      <EmailBody html={message.body_html} text={message.body_text} />
+                      <EmailBody html={message.body_html} text={message.body_text} cidMap={messageCids[message.id]} />
 
                       {msgAttachments.length > 0 && (
                         <div className="mt-5 pt-4 border-t border-[#e8eaed]">

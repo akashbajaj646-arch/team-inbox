@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { getAttachment } from '@/lib/gmail';
+import { getAttachment, createGmailClient, extractAttachments } from '@/lib/gmail';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const attachmentId = searchParams.get('id');
+    const inline = searchParams.get('inline') === '1';
 
     if (!attachmentId) {
       return NextResponse.json({ error: 'Missing id' }, { status: 400 });
@@ -53,13 +56,30 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Missing credentials' }, { status: 400 });
     }
 
-    const data = await getAttachment(inbox.google_refresh_token, message.gmail_message_id, attachment.gmail_attachment_id);
+    // Rows saved without a Gmail attachment id (older outbound sends): look it up once and store it
+    let gmailAttachmentId: string | null = attachment.gmail_attachment_id;
+    if (!gmailAttachmentId) {
+      const gmail = createGmailClient(inbox.google_refresh_token);
+      const { data: full } = await gmail.users.messages.get({ userId: 'me', id: message.gmail_message_id, format: 'full' });
+      const parts = extractAttachments(full as any);
+      const match =
+        (attachment.content_id && parts.find((p) => p.contentId === attachment.content_id)) ||
+        parts.find((p) => p.filename === attachment.filename);
+      if (!match) {
+        return NextResponse.json({ error: 'Attachment not found in Gmail' }, { status: 404 });
+      }
+      gmailAttachmentId = match.attachmentId;
+      await supabase.from('email_attachments').update({ gmail_attachment_id: gmailAttachmentId }).eq('id', attachment.id);
+    }
+
+    const data = await getAttachment(inbox.google_refresh_token, message.gmail_message_id, gmailAttachmentId as string);
     const buffer = Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': attachment.mime_type || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${attachment.filename}"`,
+        'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(attachment.filename || 'file')}"`,
+        ...(inline ? { 'Cache-Control': 'private, max-age=86400' } : {}),
         'Content-Length': String(buffer.length),
       },
     });
