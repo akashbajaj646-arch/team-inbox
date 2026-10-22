@@ -202,7 +202,7 @@ export async function POST(request: Request) {
             gmail_attachment_id: match?.attachmentId || null,
           };
         });
-        await supabase.from('email_attachments').insert(attachmentRows);
+        for (const row of attachmentRows) await supabase.from('email_attachments').insert(row);
       }
 
       // Update thread

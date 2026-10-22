@@ -130,6 +130,7 @@ async function syncThread(
         snippet: lastMessage.snippet,
         last_message_at: new Date(parseInt(lastMessage.internalDate)).toISOString(),
         is_read: !lastMessage.labelIds?.includes('UNREAD'),
+        is_archived: !gmailThread.messages.some((m: any) => m.labelIds?.includes('INBOX')),
       })
       .eq('id', existingThread.id);
 
@@ -155,7 +156,7 @@ async function syncThread(
         snippet: lastMessage.snippet,
         last_message_at: new Date(parseInt(lastMessage.internalDate)).toISOString(),
         is_read: !lastMessage.labelIds?.includes('UNREAD'),
-        is_archived: !lastMessage.labelIds?.includes('INBOX'),
+        is_archived: !gmailThread.messages.some((m: any) => m.labelIds?.includes('INBOX')),
       }, { onConflict: 'inbox_id,gmail_thread_id' })
       .select()
       .single();

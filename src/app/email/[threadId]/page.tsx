@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Toaster } from '@/lib/toast';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@/types';
@@ -121,6 +122,7 @@ export default function EmailPage() {
       <div className="h-[calc(100vh-57px)]">
         {user && <ThreadView threadId={threadId} currentUser={user} />}
       </div>
+      <Toaster />
     </div>
   );
 }

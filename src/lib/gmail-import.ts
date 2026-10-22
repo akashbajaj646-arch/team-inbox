@@ -37,7 +37,7 @@ export async function importGmailThread(
         snippet: last.snippet,
         last_message_at: new Date(parseInt(last.internalDate)).toISOString(),
         is_read: !last.labelIds?.includes('UNREAD'),
-        is_archived: !last.labelIds?.includes('INBOX'),
+        is_archived: !gmailThread.messages.some((m: any) => m.labelIds?.includes('INBOX')),
       })
       .select('id')
       .maybeSingle();
@@ -85,7 +85,8 @@ export async function importGmailThread(
         is_inline: att.isInline || false,
         content_id: att.contentId || null,
       }));
-      if (rows.length) await svc.from('email_attachments').insert(rows);
+      // One insert per row: a duplicate (blocked by the unique index) must not drop the others
+      for (const row of rows) await svc.from('email_attachments').insert(row);
     }
   }
   return threadId;

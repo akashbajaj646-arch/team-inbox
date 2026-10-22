@@ -41,6 +41,7 @@ export interface EmailThread {
   is_archived: boolean;
   is_starred: boolean;
   deleted_at: string | null;
+  snoozed_until?: string | null;
   // Joined data
   inbox?: Inbox;
   messages?: EmailMessage[];
@@ -75,6 +76,7 @@ export interface SmsThread {
   is_starred: boolean;
   is_archived: boolean;
   deleted_at: string | null;
+  snoozed_until?: string | null;
   created_at: string;
   updated_at: string;
   // Joined data

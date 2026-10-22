@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { threadAction } from '@/lib/thread-actions';
+import { Toaster } from '@/lib/toast';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { User, FilteredInbox, Inbox } from '@/types';
@@ -102,10 +104,8 @@ export default function HomePage() {
   }
 
   async function handleThreadRead(threadId: string) {
-    await supabase
-      .from('email_threads')
-      .update({ is_read: true })
-      .eq('id', threadId);
+    // Goes through the actions route so Gmail is marked read too
+    await threadAction([threadId], 'read');
   }
 
   function handleSelectThread(threadId: string, inboxId: string) {
@@ -237,6 +237,8 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      <Toaster />
 
       {/* Compose Modal */}
       {showCompose && selectedInbox && currentUser && (

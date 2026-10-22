@@ -391,6 +391,21 @@ export async function archiveThread(refreshToken: string, threadId: string) {
   });
 }
 
+// Generic label change on a thread (read/unread, archive/unarchive)
+export async function modifyThreadLabels(
+  refreshToken: string,
+  threadId: string,
+  add: string[] = [],
+  remove: string[] = []
+) {
+  const gmail = createGmailClient(refreshToken);
+  await gmail.users.threads.modify({
+    userId: 'me',
+    id: threadId,
+    requestBody: { addLabelIds: add, removeLabelIds: remove },
+  });
+}
+
 // Extract attachments from message parts
 export function extractAttachments(message: GmailMessage): Array<{
   filename: string;

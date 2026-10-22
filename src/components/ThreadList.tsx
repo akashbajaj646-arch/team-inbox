@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
+import { threadAction, snoozeOptions, type ThreadAction } from '@/lib/thread-actions';
+import { doWithUndo, showToast } from '@/lib/toast';
 import type { EmailThread, Inbox, FilteredInbox, FilterRule, Contact } from '@/types';
 
-type EmailView = 'all' | 'unread' | 'starred' | 'sent' | 'trash';
+type EmailView = 'inbox' | 'unread' | 'starred' | 'snoozed' | 'sent' | 'all' | 'trash';
 type SearchField = 'all' | 'from' | 'subject' | 'body';
 type SearchMatch = 'contains' | 'exact';
 
@@ -28,7 +30,11 @@ export default function ThreadList({
   const [displayedThreads, setDisplayedThreads] = useState<EmailThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [activeView, setActiveView] = useState<EmailView>('all');
+  const [activeView, setActiveView] = useState<EmailView>('inbox');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [snoozeMenu, setSnoozeMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [contactNames, setContactNames] = useState<Map<string, string>>(new Map());
   const [threadsWithAttachments, setThreadsWithAttachments] = useState<Set<string>>(new Set());
 
@@ -56,6 +62,14 @@ export default function ThreadList({
 
     return () => { supabase.removeChannel(channel); };
   }, [inbox.id, filteredInbox?.id, activeView]);
+
+  useEffect(() => { setSelected(new Set()); setHiddenIds(new Set()); setThreads([]); setDisplayedThreads([]); }, [inbox.id, filteredInbox?.id, activeView]);
+
+  // Re-evaluate snoozes every 30s so threads reappear on time
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   // Server-side search, debounced while typing
   useEffect(() => {
@@ -176,10 +190,12 @@ export default function ThreadList({
     }
 
     switch (activeView) {
-      case 'all': query = query.is('deleted_at', null); break;
-      case 'unread': query = query.eq('is_read', false).is('deleted_at', null); break;
+      case 'inbox': query = query.is('deleted_at', null).or('is_archived.is.null,is_archived.eq.false'); break;
+      case 'unread': query = query.eq('is_read', false).is('deleted_at', null).or('is_archived.is.null,is_archived.eq.false'); break;
       case 'starred': query = query.eq('is_starred', true).is('deleted_at', null); break;
+      case 'snoozed': query = query.is('deleted_at', null).gt('snoozed_until', new Date().toISOString()); break;
       case 'sent': query = query.is('deleted_at', null); break;
+      case 'all': query = query.is('deleted_at', null); break;
       case 'trash': query = query.not('deleted_at', 'is', null); break;
     }
 
@@ -345,16 +361,79 @@ export default function ThreadList({
     loadThreads();
   }
 
+  const UNDO: Partial<Record<ThreadAction, ThreadAction>> = {
+    archive: 'unarchive', unarchive: 'archive', trash: 'restore', restore: 'trash', snooze: 'unsnooze',
+  };
+  const DONE_LABEL: Partial<Record<ThreadAction, string>> = {
+    archive: 'Archived', unarchive: 'Moved to inbox', trash: 'Moved to trash', restore: 'Restored', snooze: 'Snoozed', unsnooze: 'Unsnoozed',
+  };
+
+  /** Run an action on threads with optimistic UI and an Undo toast. */
+  async function act(ids: string[], action: ThreadAction, until?: string) {
+    if (ids.length === 0) return;
+    setSelected(new Set());
+    const removes = ['archive', 'unarchive', 'trash', 'restore', 'snooze', 'unsnooze'].includes(action);
+    const leavesView =
+      removes &&
+      !(action === 'archive' && activeView === 'all') &&
+      !(action === 'unarchive' && activeView !== 'trash');
+
+    // Move selection to the neighbour before the open thread disappears
+    if (leavesView && selectedThreadId && ids.includes(selectedThreadId)) {
+      const list = visibleThreads;
+      const idx = list.findIndex((t) => t.id === selectedThreadId);
+      const next = list.slice(idx + 1).find((t) => !ids.includes(t.id)) || list.slice(0, idx).reverse().find((t) => !ids.includes(t.id));
+      if (next) selectThread(next);
+    }
+
+    if (leavesView) setHiddenIds((prev) => { const n = new Set(prev); ids.forEach((id) => n.add(id)); return n; });
+    if (action === 'read' || action === 'unread') {
+      const val = action === 'read';
+      setThreads((prev) => prev.map((t) => (ids.includes(t.id) ? { ...t, is_read: val } : t)));
+      setDisplayedThreads((prev) => prev.map((t) => (ids.includes(t.id) ? { ...t, is_read: val } : t)));
+      setSearchResults((prev) => prev && prev.map((t) => (ids.includes(t.id) ? { ...t, is_read: val } : t)));
+    }
+
+    const ok = await threadAction(ids, action, until);
+    const unhide = () => setHiddenIds((prev) => { const n = new Set(prev); ids.forEach((id) => n.delete(id)); return n; });
+    if (!ok) {
+      unhide();
+      loadThreads();
+      showToast({ message: 'That did not work. Please try again.', tone: 'error' });
+      return;
+    }
+    await loadThreads();
+    unhide();
+
+    const reverse = UNDO[action];
+    const label = DONE_LABEL[action];
+    if (reverse && label) {
+      const noun = ids.length === 1 ? 'Conversation' : `${ids.length} conversations`;
+      doWithUndo({
+        message: `${noun} ${label.toLowerCase()}`,
+        undo: async () => { await threadAction(ids, reverse); loadThreads(); },
+      });
+    }
+  }
+
   async function handleDelete(e: React.MouseEvent, threadId: string) {
     e.stopPropagation();
-    await supabase.from('email_threads').update({ deleted_at: new Date().toISOString() }).eq('id', threadId);
-    loadThreads();
+    act([threadId], 'trash');
   }
 
   async function handleRestore(e: React.MouseEvent, threadId: string) {
     e.stopPropagation();
-    await supabase.from('email_threads').update({ deleted_at: null }).eq('id', threadId);
-    loadThreads();
+    act([threadId], 'restore');
+  }
+
+  function openSnooze(e: React.MouseEvent, ids: string[]) {
+    e.stopPropagation();
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSnoozeMenu({ ids, x: Math.min(r.left, window.innerWidth - 260), y: Math.min(r.bottom + 4, window.innerHeight - 260) });
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
   async function handlePermanentDelete(e: React.MouseEvent, threadId: string) {
@@ -382,7 +461,16 @@ export default function ThreadList({
     if (!thread.is_read && onThreadRead) onThreadRead(thread.id);
   }
 
-  const visibleThreads = searchResults ?? displayedThreads;
+  const snoozeAware = activeView === 'inbox' || activeView === 'unread';
+  const sortKey = (t: EmailThread) => {
+    const last = new Date(t.last_message_at).getTime();
+    const sn = t.snoozed_until ? new Date(t.snoozed_until).getTime() : 0;
+    return sn && sn <= now ? Math.max(last, sn) : last;
+  };
+  const visibleThreads = (searchResults ?? displayedThreads)
+    .filter((t) => !hiddenIds.has(t.id))
+    .filter((t) => searchResults || !snoozeAware || !t.snoozed_until || new Date(t.snoozed_until).getTime() <= now)
+    .sort((a, b) => (snoozeAware && !searchResults ? sortKey(b) - sortKey(a) : 0));
 
   // Gmail-style list shortcuts: j/k move, # trash
   const listKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -390,14 +478,32 @@ export default function ThreadList({
     const t = e.target as HTMLElement | null;
     if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (!['j', 'k', '#'].includes(e.key) || visibleThreads.length === 0) return;
+    if (!['j', 'k', '#', 'e', 'x', 'b', 'I', 'U'].includes(e.key) || visibleThreads.length === 0) return;
     const idx = visibleThreads.findIndex((th) => th.id === selectedThreadId);
+    // Bulk selection wins over the open thread for action keys
+    const targets = selected.size > 0 ? Array.from(selected) : idx >= 0 ? [visibleThreads[idx].id] : [];
     if (e.key === '#') {
-      if (idx < 0 || activeView === 'trash') return;
+      if (!targets.length || activeView === 'trash') return;
+      e.preventDefault(); act(targets, 'trash'); return;
+    }
+    if (e.key === 'e') {
+      if (!targets.length || activeView === 'trash') return;
+      e.preventDefault(); act(targets, 'archive'); return;
+    }
+    if (e.key === 'I' || e.key === 'U') {
+      if (!targets.length) return;
+      e.preventDefault(); act(targets, e.key === 'I' ? 'read' : 'unread'); return;
+    }
+    if (e.key === 'x') {
+      if (idx < 0) return;
+      e.preventDefault(); toggleSelected(visibleThreads[idx].id); return;
+    }
+    if (e.key === 'b') {
+      if (!targets.length) return;
       e.preventDefault();
-      const next = visibleThreads[idx + 1] || visibleThreads[idx - 1];
-      handleDelete({ stopPropagation() {} } as React.MouseEvent, visibleThreads[idx].id);
-      if (next) selectThread(next);
+      const el = listRef.current?.querySelector(`[data-thread-id="${targets[0]}"]`) as HTMLElement | null;
+      const r = el?.getBoundingClientRect();
+      setSnoozeMenu({ ids: targets, x: (r?.left ?? 100) + 40, y: Math.min((r?.bottom ?? 100), window.innerHeight - 260) });
       return;
     }
     e.preventDefault();
@@ -413,13 +519,18 @@ export default function ThreadList({
     return () => window.removeEventListener('keydown', h);
   }, []);
 
-  const views: { key: EmailView; label: string; icon: JSX.Element }[] = [
-    { key: 'all', label: 'All', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg> },
-    { key: 'unread', label: 'Unread', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /><circle cx="18" cy="6" r="3" fill="currentColor" /></svg> },
-    { key: 'starred', label: 'Starred', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg> },
-    { key: 'sent', label: 'Sent', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg> },
-    { key: 'trash', label: 'Trash', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> },
+  const views: { key: EmailView; label: string }[] = [
+    { key: 'inbox', label: 'Inbox' },
+    { key: 'unread', label: 'Unread' },
+    { key: 'starred', label: 'Starred' },
+    { key: 'snoozed', label: 'Snoozed' },
+    { key: 'sent', label: 'Sent' },
+    { key: 'all', label: 'All mail' },
+    { key: 'trash', label: 'Trash' },
   ];
+  const selectedIds = Array.from(selected);
+  const allSelected = visibleThreads.length > 0 && visibleThreads.every((t) => selected.has(t.id));
+  const anyUnreadSelected = visibleThreads.some((t) => selected.has(t.id) && !t.is_read);
 
   return (
     <div ref={listRef} className="border-r border-analog-border-light flex flex-col h-screen bg-white flex-shrink-0 relative" style={{width: 360}}>
@@ -469,16 +580,42 @@ export default function ThreadList({
         )}
       </div>
 
-      <div className={`px-3 py-2 border-b border-analog-border bg-white gap-1 overflow-x-auto ${searchActive ? 'hidden' : 'flex'}`}>
-        {views.map((view) => (
-          <button key={view.key} onClick={() => setActiveView(view.key)} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium whitespace-nowrap transition-colors ${activeView === view.key ? 'bg-[#d3e3fd] text-[#041e49]' : 'text-[#444746] hover:bg-[#f1f3f4]'}`}>
-            {view.icon}{view.label}
-          </button>
-        ))}
-      </div>
+      {selected.size > 0 ? (
+        <div className="px-2 h-11 border-b border-analog-border bg-[#f6f8fc] flex items-center gap-0.5">
+          <BulkButton title={allSelected ? 'Deselect all' : 'Select all'} onClick={() => setSelected(allSelected ? new Set() : new Set(visibleThreads.map((t) => t.id)))}>
+            <Checkbox checked={allSelected} partial={!allSelected} />
+          </BulkButton>
+          <span className="text-xs font-medium text-[#444746] px-1.5 mr-auto">{selected.size} selected</span>
+          {activeView === 'trash' ? (
+            <BulkButton title="Restore" onClick={() => act(selectedIds, 'restore')}><Ico d={ICON.restore} /></BulkButton>
+          ) : (
+            <>
+              {activeView === 'all'
+                ? <BulkButton title="Move to inbox" onClick={() => act(selectedIds, 'unarchive')}><Ico d={ICON.inbox} /></BulkButton>
+                : <BulkButton title="Archive (e)" onClick={() => act(selectedIds, 'archive')}><Ico d={ICON.archive} /></BulkButton>}
+              <BulkButton title="Move to trash (#)" onClick={() => act(selectedIds, 'trash')}><Ico d={ICON.trash} /></BulkButton>
+              <BulkButton title={anyUnreadSelected ? 'Mark as read' : 'Mark as unread'} onClick={() => act(selectedIds, anyUnreadSelected ? 'read' : 'unread')}>
+                <Ico d={anyUnreadSelected ? ICON.read : ICON.unread} />
+              </BulkButton>
+              {activeView === 'snoozed'
+                ? <BulkButton title="Unsnooze" onClick={() => act(selectedIds, 'unsnooze')}><Ico d={ICON.inbox} /></BulkButton>
+                : <BulkButton title="Snooze (b)" onClick={(e) => openSnooze(e, selectedIds)}><Ico d={ICON.clock} /></BulkButton>}
+            </>
+          )}
+          <BulkButton title="Clear selection" onClick={() => setSelected(new Set())}><Ico d={ICON.close} /></BulkButton>
+        </div>
+      ) : (
+        <div className={`px-3 py-2 border-b border-analog-border bg-white gap-1 overflow-x-auto ${searchActive ? 'hidden' : 'flex'}`}>
+          {views.map((view) => (
+            <button key={view.key} onClick={() => setActiveView(view.key)} className={`px-2.5 py-1 rounded-full text-[13px] font-medium whitespace-nowrap transition-colors ${activeView === view.key ? 'bg-[#d3e3fd] text-[#041e49]' : 'text-[#444746] hover:bg-[#f1f3f4]'}`}>
+              {view.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
-        {loading && !searchActive ? (
+        {loading && !searchActive && threads.length === 0 ? (
           <div className="p-6 text-center text-analog-text-muted">Loading emails...</div>
         ) : visibleThreads.length === 0 ? (
           <div className="p-6 text-center">
@@ -488,11 +625,11 @@ export default function ThreadList({
               </svg>
             </div>
             <p className="text-analog-text-muted mb-2">
-              {searchActive ? (searching ? 'Searching...' : 'No results in this inbox or Gmail') : (<>{activeView === 'all' && 'No emails yet'}{activeView === 'unread' && 'No unread emails'}{activeView === 'starred' && 'No starred emails'}{activeView === 'sent' && 'No sent emails'}{activeView === 'trash' && 'Trash is empty'}</>)}
+              {searchActive ? (searching ? 'Searching...' : 'No results in this inbox or Gmail') : ({ inbox: 'Inbox zero. Nice work.', unread: 'No unread emails', starred: 'No starred emails', snoozed: 'Nothing snoozed', sent: 'No sent emails', all: 'No emails yet', trash: 'Trash is empty' }[activeView])}
             </p>
             {searchActive ? <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline font-medium">Clear search</button>
-              : activeView === 'all' && inbox.google_refresh_token ? <button onClick={handleSync} className="text-sm text-analog-accent hover:underline font-medium">Sync from Gmail</button>
-              : activeView === 'all' && !inbox.google_refresh_token ? <a href="/api/auth/google" className="text-sm text-analog-accent hover:underline font-medium">Connect Gmail first</a>
+              : (activeView === 'all' || activeView === 'inbox') && threads.length === 0 && inbox.google_refresh_token ? <button onClick={handleSync} className="text-sm text-analog-accent hover:underline font-medium">Sync from Gmail</button>
+              : (activeView === 'all' || activeView === 'inbox') && !inbox.google_refresh_token ? <a href="/api/auth/google" className="text-sm text-analog-accent hover:underline font-medium">Connect Gmail first</a>
               : null}
           </div>
         ) : (
@@ -500,17 +637,28 @@ export default function ThreadList({
             {visibleThreads.map((thread) => {
               const isSelected = selectedThreadId === thread.id;
               const unread = !thread.is_read;
+              const checked = selected.has(thread.id);
+              const snoozedUntil = thread.snoozed_until && new Date(thread.snoozed_until).getTime() > now ? new Date(thread.snoozed_until) : null;
               return (
               <div
                 key={thread.id}
                 data-thread-id={thread.id}
                 onClick={() => selectThread(thread)}
-                className={`relative group cursor-pointer border-b border-[#f1f3f4] ${isSelected ? 'bg-[#e8f0fe]' : 'bg-white hover:bg-[#f8f9fa] hover:shadow-[inset_1px_0_0_#dadce0,inset_-1px_0_0_#dadce0,0_1px_2px_rgba(60,64,67,.15)]'}`}
+                className={`relative group cursor-pointer border-b border-[#f1f3f4] ${checked ? 'bg-[#c2dbff]' : isSelected ? 'bg-[#e8f0fe]' : 'bg-white hover:bg-[#f8f9fa] hover:shadow-[inset_1px_0_0_#dadce0,inset_-1px_0_0_#dadce0,0_1px_2px_rgba(60,64,67,.15)]'}`}
               >
                 {isSelected && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#1a73e8]" />}
                 <div className="pl-3 pr-3 py-2 flex gap-2">
-                  <div className="w-3 pt-[7px] flex-shrink-0 flex justify-center">
-                    {unread && <span className="w-2 h-2 rounded-full bg-[#1a73e8]" title="Unread" />}
+                  <div className="w-5 pt-0.5 flex-shrink-0 flex justify-center">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleSelected(thread.id); }}
+                      className={`w-5 h-5 items-center justify-center ${selected.size > 0 || checked ? 'flex' : 'hidden group-hover:flex'}`}
+                      title="Select (x)"
+                    >
+                      <Checkbox checked={checked} />
+                    </button>
+                    {unread && selected.size === 0 && !checked && (
+                      <span className="w-2 h-2 mt-[5px] rounded-full bg-[#1a73e8] group-hover:hidden" title="Unread" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 h-5">
@@ -526,7 +674,9 @@ export default function ThreadList({
                         <svg className="w-3.5 h-3.5 text-[#f4b400] flex-shrink-0 group-hover:hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
                       )}
                       <span className={`text-xs flex-shrink-0 group-hover:hidden ${unread ? 'font-bold text-[#202124]' : 'text-[#5f6368]'}`}>
-                        {formatDate(thread.last_message_at)}
+                        {snoozedUntil
+                          ? <span className="text-[#b06000]" title={`Snoozed until ${snoozedUntil.toLocaleString()}`}>{snoozedUntil.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</span>
+                          : formatDate(thread.last_message_at)}
                       </span>
                       <div className="hidden group-hover:flex items-center gap-0.5 -mr-1">
                         {activeView !== 'trash' && (
@@ -544,9 +694,20 @@ export default function ThreadList({
                             </button>
                           </>
                         ) : (
+                          <>
+                          {activeView === 'all' && thread.is_archived
+                            ? <RowButton title="Move to inbox" onClick={(e) => { e.stopPropagation(); act([thread.id], 'unarchive'); }}><Ico d={ICON.inbox} small /></RowButton>
+                            : <RowButton title="Archive (e)" onClick={(e) => { e.stopPropagation(); act([thread.id], 'archive'); }}><Ico d={ICON.archive} small /></RowButton>}
+                          <RowButton title={unread ? 'Mark as read' : 'Mark as unread'} onClick={(e) => { e.stopPropagation(); act([thread.id], unread ? 'read' : 'unread'); }}>
+                            <Ico d={unread ? ICON.read : ICON.unread} small />
+                          </RowButton>
+                          {snoozedUntil
+                            ? <RowButton title="Unsnooze" onClick={(e) => { e.stopPropagation(); act([thread.id], 'unsnooze'); }}><Ico d={ICON.inbox} small /></RowButton>
+                            : <RowButton title="Snooze (b)" onClick={(e) => openSnooze(e, [thread.id])}><Ico d={ICON.clock} small /></RowButton>}
                           <button onClick={(e) => handleDelete(e, thread.id)} className="p-1 rounded-full text-[#5f6368] hover:bg-[#e8eaed] hover:text-[#202124]" title="Move to trash (#)">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -564,7 +725,84 @@ export default function ThreadList({
           </div>
         )}
       </div>
+
+      {snoozeMenu && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setSnoozeMenu(null)} />
+          <div className="fixed z-[61] w-64 bg-white border border-[#dadce0] rounded-lg shadow-xl py-2" style={{ left: snoozeMenu.x, top: snoozeMenu.y }}>
+            <div className="px-4 pb-1.5 text-xs font-medium text-[#5f6368]">Snooze until...</div>
+            {snoozeOptions().map((o) => (
+              <button
+                key={o.label}
+                onClick={() => { const ids = snoozeMenu.ids; setSnoozeMenu(null); act(ids, 'snooze', o.until.toISOString()); }}
+                className="w-full flex items-center justify-between px-4 py-2 text-sm text-[#202124] hover:bg-[#f1f3f4]"
+              >
+                <span>{o.label}</span>
+                <span className="text-xs text-[#5f6368]">{o.detail}</span>
+              </button>
+            ))}
+            <label className="block px-4 pt-2 mt-1 border-t border-[#f1f3f4] text-xs text-[#5f6368]">
+              Pick date and time
+              <input
+                type="datetime-local"
+                className="mt-1 w-full text-sm text-[#202124] border border-[#dadce0] rounded px-2 py-1"
+                onChange={(e) => {
+                  const d = new Date(e.target.value);
+                  if (isNaN(d.getTime()) || d.getTime() <= Date.now()) return;
+                  const ids = snoozeMenu.ids; setSnoozeMenu(null); act(ids, 'snooze', d.toISOString());
+                }}
+              />
+            </label>
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+const ICON = {
+  archive: 'M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4',
+  inbox: 'M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4',
+  trash: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
+  read: 'M3 19v-8.93a2 2 0 01.89-1.664l7-4.666a2 2 0 012.22 0l7 4.666A2 2 0 0121 10.07V19M3 19a2 2 0 002 2h14a2 2 0 002-2M3 19l6.75-4.5M21 19l-6.75-4.5M3 10l6.75 4.5M21 10l-6.75 4.5m0 0l-1.14.76a2 2 0 01-2.22 0l-1.14-.76',
+  unread: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+  clock: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+  restore: 'M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6',
+  close: 'M6 18L18 6M6 6l12 12',
+};
+
+function Ico({ d, small }: { d: string; small?: boolean }) {
+  return (
+    <svg className={small ? 'w-4 h-4' : 'w-[18px] h-[18px]'} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+    </svg>
+  );
+}
+
+function RowButton({ title, onClick, children }: { title: string; onClick: (e: React.MouseEvent) => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} title={title} className="p-1 rounded-full text-[#5f6368] hover:bg-[#e8eaed] hover:text-[#202124]">
+      {children}
+    </button>
+  );
+}
+
+function BulkButton({ title, onClick, children }: { title: string; onClick: (e: React.MouseEvent) => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} title={title} className="p-2 rounded-full text-[#444746] hover:bg-[#e8eaed] hover:text-[#202124]">
+      {children}
+    </button>
+  );
+}
+
+function Checkbox({ checked, partial }: { checked: boolean; partial?: boolean }) {
+  return (
+    <span className={`w-4 h-4 rounded-[3px] border-2 flex items-center justify-center ${checked ? 'bg-[#0b57d0] border-[#0b57d0]' : 'border-[#747775] bg-white'}`}>
+      {checked && (
+        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+      )}
+      {!checked && partial && <span className="w-2 h-0.5 bg-[#747775]" />}
+    </span>
   );
 }
 

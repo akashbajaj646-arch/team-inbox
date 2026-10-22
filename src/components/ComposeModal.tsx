@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Inbox, User } from '@/types';
 import TemplatePicker from './TemplatePicker';
+import { runWithUndo, showToast } from '@/lib/toast';
 import { MAX_EMAIL_FILES, MAX_EMAIL_TOTAL_BYTES, validateEmailAttachments, formatFileSize, getTotalSize, MAX_SMS_FILES, MAX_WHATSAPP_FILES, validateSmsAttachments, isRiskyFile } from '@/lib/attachments';
 import { useAutoSave } from '@/lib/use-autosave';
 import { extractInlineImages, attachImageResizer, attachImagePasteHandler, MAX_INLINE_IMAGES, type InlineImage } from '@/lib/inline-images';
@@ -19,6 +20,8 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const isSms = inbox.inbox_type === 'sms';
   const isWhatsApp = inbox.inbox_type === 'whatsapp';
 
+  const [winMode, setWinMode] = useState<'normal' | 'min' | 'max'>('normal');
+  const [pendingSend, setPendingSend] = useState(false);
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
   const [showCc, setShowCc] = useState(false);
@@ -201,23 +204,42 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
           ...regularAttachments,
           ...inlineImages.map(img => ({ ...img, inline: true })),
         ];
-        const res = await fetch('/api/emails/send-new', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            inboxId: inbox.id,
-            to: to.trim(),
-            cc: cc.trim() || undefined,
-            subject: subject.trim(),
-            body: bodyHtml,
-            attachments: allAttachments,
-            isNew: true,
-          }),
+        const payload = JSON.stringify({
+          inboxId: inbox.id,
+          to: to.trim(),
+          cc: cc.trim() || undefined,
+          subject: subject.trim(),
+          body: bodyHtml,
+          attachments: allAttachments,
+          isNew: true,
         });
-        if (!res.ok) {
-          const d = await res.json();
-          throw new Error(d.error || 'Failed to send email');
-        }
+        const sentDraftId = draftId;
+        // Hide the window for 5s with an Undo; it stays mounted so Undo restores everything
+        setPendingSend(true);
+        setSending(false);
+        runWithUndo({
+          message: 'Sending...',
+          delayMs: 5000,
+          onUndo: () => { setPendingSend(false); showToast({ message: 'Sending undone', duration: 3000 }); },
+          run: async () => {
+            try {
+              const res = await fetch('/api/emails/send-new', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
+              if (!res.ok) {
+                const d = await res.json().catch(() => ({}));
+                throw new Error(d.error || 'Failed to send email');
+              }
+              if (sentDraftId) fetch(`/api/drafts?id=${sentDraftId}`, { method: 'DELETE' }).catch(() => {});
+              showToast({ message: 'Message sent', duration: 3000 });
+              onSent?.();
+              onClose();
+            } catch (err: any) {
+              setPendingSend(false);
+              setError(err.message || 'Failed to send');
+              showToast({ message: `Send failed: ${err.message || 'unknown error'}`, tone: 'error', duration: 8000 });
+            }
+          },
+        });
+        return;
       } else {
         if (!phone.trim() || (!message.trim() && smsMedia.length === 0)) {
           setError('Phone number and message or media are required.');
@@ -305,28 +327,60 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-      <div className="bg-analog-surface rounded-2xl shadow-analog-lg border-2 border-analog-border-strong w-full max-w-2xl mx-4 overflow-hidden flex flex-col max-h-[90vh]">
+    <div
+      className={`${pendingSend ? 'hidden' : ''} ${winMode === 'max' ? 'fixed inset-0 z-50 flex items-center justify-center bg-black/30' : 'fixed bottom-0 right-6 z-50'}`}
+      onClick={(e) => { if (winMode === 'max' && e.target === e.currentTarget) setWinMode('normal'); }}
+      onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (!sending) handleSend(); } }}
+    >
+      <div
+        className={`bg-white shadow-[0_8px_30px_rgba(60,64,67,0.35)] border border-[#dadce0] overflow-hidden flex flex-col ${
+          winMode === 'max'
+            ? 'w-[min(1000px,94vw)] h-[88vh] rounded-xl'
+            : winMode === 'min'
+              ? 'w-[300px] rounded-t-xl'
+              : 'w-[min(580px,96vw)] h-[min(620px,calc(100vh-24px))] rounded-t-xl'
+        }`}
+      >
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b-2 border-analog-border-strong bg-analog-surface-alt">
-          <div className="w-9 h-9 rounded-lg bg-analog-accent flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <div>
-            <p className="font-semibold text-sm text-analog-text">New Email</p>
-            <p className="text-xs text-analog-text-muted">{inbox.email_address}</p>
-          </div>
+        <div
+          className="flex items-center gap-2 pl-4 pr-1.5 h-10 bg-[#f2f6fc] cursor-pointer flex-shrink-0 select-none"
+          onClick={() => setWinMode(winMode === 'min' ? 'normal' : 'min')}
+        >
+          <p className="flex-1 min-w-0 text-sm font-medium text-[#1f1f1f] truncate">
+            {winMode === 'min' && isEmail && subject.trim()
+              ? subject.trim()
+              : isEmail ? 'New message' : isWhatsApp ? 'New WhatsApp message' : 'New text message'}
+            <span className="ml-2 text-xs font-normal text-[#5f6368]">
+              {isEmail ? inbox.email_address : (inbox as any).twilio_phone_number || inbox.name}
+            </span>
+          </p>
           <button
-            onClick={async () => { await flushDraft(); onClose(); }}
-            className="ml-auto p-2 text-analog-text-muted hover:text-analog-text hover:bg-analog-hover rounded-lg transition-all duration-150"
+            onClick={(e) => { e.stopPropagation(); setWinMode(winMode === 'min' ? 'normal' : 'min'); }}
+            title={winMode === 'min' ? 'Restore' : 'Minimize'}
+            className="p-1.5 rounded text-[#444746] hover:bg-[#e1e5ea]"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M5 12h14" /></svg>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setWinMode(winMode === 'max' ? 'normal' : 'max'); }}
+            title={winMode === 'max' ? 'Exit full screen' : 'Full screen'}
+            className="p-1.5 rounded text-[#444746] hover:bg-[#e1e5ea]"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              {winMode === 'max'
+                ? <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+                : <path strokeLinecap="round" strokeLinejoin="round" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
             </svg>
           </button>
+          <button
+            onClick={async (e) => { e.stopPropagation(); await flushDraft(); onClose(); }}
+            title="Save and close"
+            className="p-1.5 rounded text-[#444746] hover:bg-[#e1e5ea]"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
         </div>
+        <div className={`${winMode === 'min' ? 'hidden' : 'flex'} flex-col flex-1 min-h-0`}>
 
         {error && (
           <div className="px-5 py-3 bg-analog-error/10 border-b border-analog-error/20 text-analog-error text-sm">
@@ -499,22 +553,15 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                   }}
                 />
 
-                <div className="w-px h-5 bg-analog-border mx-1" />
-
-                {/* Templates */}
-                <TemplatePicker
-                  inboxId={inbox.id}
-                  onSelect={handleTemplateSelect}
-                />
               </div>
 
               {/* Rich text editor */}
-              <div className="px-5 py-4 min-h-[200px]">
+              <div className="px-4 py-3 min-h-[200px]">
                 <div
                   ref={editorRef}
                   contentEditable
                   suppressContentEditableWarning
-                  className="w-full min-h-[180px] bg-transparent text-sm text-analog-text focus:outline-none leading-relaxed"
+                  className="w-full min-h-[220px] bg-transparent text-sm text-[#202124] focus:outline-none leading-relaxed"
                   style={{ wordBreak: 'break-word' }}
                   data-placeholder="Write your message..."
                 />
@@ -655,48 +702,44 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t-2 border-analog-border-strong bg-analog-surface-alt">
-          <button
-            onClick={async () => {
-              if (draftId) {
-                if (confirm('Discard this draft?')) {
-                  await fetch(`/api/drafts?id=${draftId}`, { method: 'DELETE' });
-                  onClose();
-                }
-              } else {
-                onClose();
-              }
-            }}
-            className="px-4 py-2 text-analog-text-muted hover:text-analog-text transition-colors text-sm font-medium"
-          >
-            Discard
-          </button>
-          <TemplatePicker
-            inboxId={inbox.id}
-            onSelect={handleTemplateSelect}
-          />
+        <div className="flex items-center gap-1 px-4 py-3 border-t border-[#f1f3f4] flex-shrink-0">
           <button
             onClick={handleSend}
             disabled={sending}
-            className="btn btn-primary disabled:opacity-50"
+            title="Send (Ctrl/⌘ + Enter)"
+            className="h-9 px-6 rounded-full bg-[#0b57d0] text-white text-sm font-medium hover:bg-[#0a4ebb] hover:shadow disabled:opacity-50"
           >
-            {sending ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Sending...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-                Send
-              </>
-            )}
+            {sending ? 'Sending...' : 'Send'}
           </button>
+          {isEmail && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach files"
+              className="p-2 rounded-full text-[#5f6368] hover:bg-[#f1f3f4] hover:text-[#202124]"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              </svg>
+            </button>
+          )}
+          <TemplatePicker inboxId={inbox.id} onSelect={handleTemplateSelect} variant="icon" />
+          <div className="flex-1" />
+          <button
+            onClick={async () => {
+              if (draftId) {
+                if (!confirm('Discard this draft?')) return;
+                await fetch(`/api/drafts?id=${draftId}`, { method: 'DELETE' });
+              }
+              onClose();
+            }}
+            title="Discard draft"
+            className="p-2 rounded-full text-[#5f6368] hover:bg-[#f1f3f4] hover:text-[#202124]"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
         </div>
       </div>
     </div>

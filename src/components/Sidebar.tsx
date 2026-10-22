@@ -39,6 +39,8 @@ export default function Sidebar({
   const [loading, setLoading] = useState(true);
   const [mentions, setMentions] = useState<any[]>([]);
   const [draftCount, setDraftCount] = useState(0);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [showConnect, setShowConnect] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,6 +158,55 @@ export default function Sidebar({
     setLoading(false);
   }
 
+  // Unread counts per inbox, refreshed every 20s and when the window regains focus
+  useEffect(() => {
+    if (inboxes.length === 0) return;
+    let cancelled = false;
+    async function loadCounts() {
+      const nowIso = new Date().toISOString();
+      const entries = await Promise.all(
+        inboxes.map(async (ib) => {
+          if (ib.inbox_type === 'sms' || ib.inbox_type === 'whatsapp') {
+            const { count } = await supabase
+              .from('sms_threads')
+              .select('id', { count: 'exact', head: true })
+              .eq('inbox_id', ib.id)
+              .eq('is_read', false)
+              .is('deleted_at', null);
+            return [ib.id, count || 0] as const;
+          }
+          const base = () => supabase
+            .from('email_threads')
+            .select('id', { count: 'exact', head: true })
+            .eq('inbox_id', ib.id)
+            .eq('is_read', false)
+            .is('deleted_at', null)
+            .is('filtered_inbox_id', null)
+            .or('is_archived.is.null,is_archived.eq.false');
+          let { count, error } = await base().or(`snoozed_until.is.null,snoozed_until.lte.${nowIso}`);
+          if (error) ({ count } = await base()); // snooze column not added yet
+          return [ib.id, count || 0] as const;
+        })
+      );
+      if (!cancelled) setUnreadCounts(Object.fromEntries(entries));
+    }
+    loadCounts();
+    const t = setInterval(loadCounts, 20000);
+    window.addEventListener('focus', loadCounts);
+    return () => { cancelled = true; clearInterval(t); window.removeEventListener('focus', loadCounts); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inboxes]);
+
+  useEffect(() => {
+    try { setShowConnect(localStorage.getItem('ti.showConnect') === '1'); } catch { /* ignore */ }
+  }, []);
+  function toggleConnect() {
+    setShowConnect((v) => {
+      try { localStorage.setItem('ti.showConnect', v ? '0' : '1'); } catch { /* ignore */ }
+      return !v;
+    });
+  }
+
   function toggleExpand(inboxId: string) {
     setExpandedInboxes(prev => {
       const next = new Set(prev);
@@ -220,24 +271,30 @@ export default function Sidebar({
           )}
           <button
             onClick={() => onSelectInbox(inbox.id, null)}
-            className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 text-left border ${
+            className={`flex-1 min-w-0 flex items-center gap-3 pl-3 pr-3 h-8 rounded-full transition-colors text-left text-sm ${
               selectedInboxId === inbox.id && !selectedFilteredInboxId
-                ? 'bg-[#d8e3fb] text-[#005bc4] border-l-4 border-l-[#005bc4] border-transparent'
-                : 'text-analog-text-muted border-transparent hover:bg-analog-surface-alt hover:border-analog-border'
+                ? 'bg-[#d3e3fd] text-[#041e49] font-semibold'
+                : unreadCounts[inbox.id]
+                  ? 'text-[#202124] font-semibold hover:bg-[#e8eaed]'
+                  : 'text-[#444746] hover:bg-[#e8eaed]'
             }`}
+            title={inbox.email_address || inbox.name}
           >
             <InboxIcon inbox={inbox} />
-            <span className="flex-1 font-medium truncate">{inbox.name}</span>
+            <span className="flex-1 truncate">{inbox.name}</span>
+            {!!unreadCounts[inbox.id] && (
+              <span className="text-xs font-semibold tabular-nums">{unreadCounts[inbox.id] > 999 ? '999+' : unreadCounts[inbox.id]}</span>
+            )}
           </button>
         </div>
 
         {expandedInboxes.has(inbox.id) && inbox.filteredInboxes && inbox.filteredInboxes.length > 0 && (
-          <div className="ml-6 mt-1 space-y-1">
+          <div className="ml-6 mt-0.5 space-y-0.5">
             {inbox.filteredInboxes.map((fi) => (
               <button
                 key={fi.id}
                 onClick={() => onSelectInbox(inbox.id, fi.id)}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-150 text-left border text-sm ${
+                className={`w-full flex items-center gap-2 px-3 h-7 rounded-full transition-colors text-left border text-[13px] ${
                   selectedFilteredInboxId === fi.id
                     ? 'bg-analog-secondary/20 text-analog-secondary border-analog-secondary/30'
                     : 'text-analog-text-muted border-transparent hover:bg-analog-surface-alt hover:border-analog-border'
@@ -263,23 +320,23 @@ export default function Sidebar({
         className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10 group"
       />
       {/* Logo */}
-      <div className="p-6 border-b border-analog-border-light">
+      <div className="px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-analog-accent to-analog-accent-light flex items-center justify-center shadow-analog-accent">
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           </div>
-          <span className="font-display text-xl font-medium text-analog-text">{companyName}</span>
+          <span className="font-display text-lg font-medium text-analog-text truncate">{companyName}</span>
         </div>
       </div>
 
       {/* Compose Button */}
-      <div className="px-4 pt-4 pb-2">
+      <div className="px-3 pt-1 pb-2">
         <button
           onClick={onCompose}
           disabled={!selectedInboxId}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-analog-accent hover:bg-analog-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mb-2 inline-flex items-center gap-3 h-12 pl-4 pr-6 rounded-2xl text-sm font-medium text-[#001d35] bg-[#c2e7ff] hover:shadow-md transition-shadow disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -288,10 +345,10 @@ export default function Sidebar({
         </button>
 
         {/* Mentions Badge */}
-        <div className="relative mt-2">
+        <div className="relative">
           <button
             onClick={() => setShowMentions(!showMentions)}
-            className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+            className={`w-full flex items-center gap-3 px-3 h-8 rounded-full text-sm transition-colors ${
               showMentions
                 ? 'bg-analog-accent/10 text-analog-accent border border-analog-accent/20'
                 : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text border border-transparent'
@@ -395,7 +452,7 @@ export default function Sidebar({
         {/* Broadcasts */}
         <button
           onClick={() => { if (typeof window !== 'undefined') window.location.href = '/broadcasts'; }}
-          className="mt-2 w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 text-analog-text-muted hover:bg-analog-hover hover:text-analog-text"
+          className="mt-0.5 w-full flex items-center gap-3 px-3 h-8 rounded-full text-sm transition-colors text-[#444746] hover:bg-[#e8eaed]"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
@@ -406,7 +463,7 @@ export default function Sidebar({
         {/* Drafts */}
         <button
           onClick={() => { if (typeof window !== 'undefined') window.location.href = '/drafts'; }}
-          className="mt-2 w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 text-analog-text-muted hover:bg-analog-hover hover:text-analog-text"
+          className="mt-0.5 w-full flex items-center gap-3 px-3 h-8 rounded-full text-sm transition-colors text-[#444746] hover:bg-[#e8eaed]"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
@@ -420,7 +477,7 @@ export default function Sidebar({
         {/* All Inboxes Search */}
         <button
           onClick={onSelectAllInboxes}
-          className={`mt-2 w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+          className={`mt-0.5 w-full flex items-center gap-3 px-3 h-8 rounded-full text-sm transition-colors ${
             showAllInboxes
               ? 'bg-analog-accent/10 text-analog-accent border border-analog-accent/20'
               : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text border border-transparent'
@@ -434,7 +491,7 @@ export default function Sidebar({
       </div>
 
       {/* Inboxes */}
-      <div className="p-4 flex-1 overflow-y-auto space-y-4">
+      <div className="px-3 pb-3 pt-1 flex-1 overflow-y-auto space-y-3">
         {loading ? (
           <div className="px-2 py-4 text-center text-analog-text-muted text-sm">Loading...</div>
         ) : (
@@ -442,10 +499,10 @@ export default function Sidebar({
             {/* My Inboxes (Personal) */}
             {personalInboxes.length > 0 && (
               <div>
-                <div className="text-[11px] uppercase tracking-wider text-analog-text-faint font-semibold mb-2 px-2">
+                <div className="text-[11px] uppercase tracking-wider text-analog-text-faint font-semibold mb-1 px-3">
                   My Inbox
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {personalInboxes.map((inbox) => (
                     <InboxItem key={inbox.id} inbox={inbox} />
                   ))}
@@ -456,10 +513,10 @@ export default function Sidebar({
             {/* Shared Inboxes */}
             {sharedInboxes.length > 0 && (
               <div>
-                <div className="text-[11px] uppercase tracking-wider text-analog-text-faint font-semibold mb-2 px-2">
+                <div className="text-[11px] uppercase tracking-wider text-analog-text-faint font-semibold mb-1 px-3">
                   {personalInboxes.length > 0 ? 'Shared Inboxes' : 'Inboxes'}
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {sharedInboxes.map((inbox) => (
                     <InboxItem key={inbox.id} inbox={inbox} />
                   ))}
@@ -476,13 +533,15 @@ export default function Sidebar({
         )}
 
         {/* Connect New */}
-        <div className="space-y-1 pt-2">
-          <div className="text-[11px] uppercase tracking-wider text-analog-text-faint font-semibold mb-2 px-2">
-            Connect
-          </div>
+        <div className="space-y-0.5 pt-1">
+          <button onClick={toggleConnect} className="w-full flex items-center gap-1 text-[11px] uppercase tracking-wider text-analog-text-faint font-semibold mb-1 px-3 hover:text-analog-text">
+            <svg className={`w-3 h-3 transition-transform ${showConnect ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+            Connect an account
+          </button>
+          {showConnect && (<>
           <a
             href="/api/auth/google?personal=true"
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-analog-text-muted border border-transparent hover:bg-analog-surface-alt hover:border-analog-border transition-all duration-150"
+            className="w-full flex items-center gap-3 px-3 h-8 rounded-full text-[#444746] hover:bg-[#e8eaed] transition-colors"
           >
             <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -491,7 +550,7 @@ export default function Sidebar({
           </a>
           <a
             href="/api/auth/google"
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-analog-text-muted border border-transparent hover:bg-analog-surface-alt hover:border-analog-border transition-all duration-150"
+            className="w-full flex items-center gap-3 px-3 h-8 rounded-full text-[#444746] hover:bg-[#e8eaed] transition-colors"
           >
             <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -500,21 +559,22 @@ export default function Sidebar({
           </a>
           <Link
             href="/settings?tab=sms"
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-analog-text-muted border border-transparent hover:bg-analog-surface-alt hover:border-analog-border transition-all duration-150"
+            className="w-full flex items-center gap-3 px-3 h-8 rounded-full text-[#444746] hover:bg-[#e8eaed] transition-colors"
           >
             <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
             <span className="text-sm font-medium">Twilio SMS / WhatsApp</span>
           </Link>
+          </>)}
         </div>
       </div>
 
       {/* Settings */}
-      <div className="px-4 pb-3">
+      <div className="px-3 pb-2">
         <Link
           href="/settings"
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-analog-text-muted border border-transparent hover:bg-analog-surface-alt hover:border-analog-border transition-all duration-150"
+          className="w-full flex items-center gap-3 px-3 h-8 rounded-full text-[#444746] hover:bg-[#e8eaed] transition-colors"
         >
           <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -525,9 +585,9 @@ export default function Sidebar({
       </div>
 
       {/* User */}
-      <div className="p-4 border-t border-analog-border-light">
+      <div className="px-3 py-2.5 border-t border-analog-border-light">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-analog-secondary to-analog-secondary-light flex items-center justify-center text-white font-semibold text-sm border-2 border-analog-border">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-analog-secondary to-analog-secondary-light flex items-center justify-center text-white font-semibold text-sm border-2 border-analog-border">
             {currentUser.name?.charAt(0) || currentUser.email.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">

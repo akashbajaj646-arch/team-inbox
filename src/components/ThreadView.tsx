@@ -11,6 +11,8 @@ import TemplatePicker from './TemplatePicker';
 import RichTextEditor from './RichTextEditor';
 import CustomerCard from './CustomerCard';
 import ComposeModal from './ComposeModal';
+import { runWithUndo, showToast, doWithUndo } from '@/lib/toast';
+import { threadAction } from '@/lib/thread-actions';
 
 interface Attachment {
   file: File;
@@ -296,6 +298,8 @@ const Icon = {
   download: <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />,
   close: <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />,
   unfold: <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l4-4 4 4M16 15l-4 4-4-4" />,
+  archive: <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />,
+  unread: <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />,
 };
 
 function Svg({ children, className = 'w-4 h-4' }: { children: React.ReactNode; className?: string }) {
@@ -357,6 +361,11 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const inlineRegistryRef = useRef<Map<string, InlineImage>>(new Map());
   const initialBodyRef = useRef<string>('');
   const lastMessageIdRef = useRef<string | null>(null);
+  const activeThreadRef = useRef(threadId);
+  useEffect(() => {
+    activeThreadRef.current = threadId;
+    return () => { activeThreadRef.current = ''; };
+  }, [threadId]);
   const [, setInlineCount] = useState(0);
   const supabase = createClient();
 
@@ -575,7 +584,12 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     if (data) {
       const byMessage: Record<string, EmailAttachment[]> = {};
       const cids: Record<string, Record<string, string>> = {};
+      const seenPart = new Set<string>();
       data.forEach((att: EmailAttachment & { content_id?: string | null }) => {
+        // Older rows were sometimes saved twice; show each part once
+        const partKey = `${att.message_id}|${att.filename}|${att.content_id || ''}`;
+        if (seenPart.has(partKey)) return;
+        seenPart.add(partKey);
         if (att.content_id) {
           (cids[att.message_id] ||= {})[att.content_id.trim().toLowerCase()] = att.id;
         }
@@ -695,6 +709,8 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   async function handleSend() {
     if (!replyBody.trim() || replyBody === '<p></p>') return;
     setSending(true);
+
+    let payload: string;
     try {
       const uploadedAttachments: { filename: string; mimeType: string; data: string; inline?: boolean; cid?: string }[] = [];
       for (const attachment of attachments) {
@@ -703,43 +719,83 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       }
       const { html: rewrittenBody, inlineImages } = extractInlineImages(replyBody, inlineRegistryRef.current);
       for (const img of inlineImages) uploadedAttachments.push({ ...img, inline: true });
-
-      const response = await fetch('/api/emails/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          threadId,
-          body: rewrittenBody,
-          attachments: uploadedAttachments,
-          cc: ccField.trim() || undefined,
-          bcc: bccField.trim() || undefined,
-        }),
+      payload = JSON.stringify({
+        threadId,
+        body: rewrittenBody,
+        attachments: uploadedAttachments,
+        cc: ccField.trim() || undefined,
+        bcc: bccField.trim() || undefined,
       });
-
-      if (response.ok) {
-        if (draftId) {
-          await fetch(`/api/drafts?id=${draftId}`, { method: 'DELETE' });
-          setDraftId(null);
-        }
-        setReplyBody('');
-        setAttachments([]);
-        setCcField('');
-        setBccField('');
-        setShowCcBcc(false);
-        setShowComposer(false);
-        inlineRegistryRef.current.clear();
-        initialBodyRef.current = '';
-        await loadMessages();
-        setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }), 100);
-      } else {
-        const err = await response.json().catch(() => ({}));
-        alert(`Send failed${err?.error ? `: ${err.error}` : ''}`);
-      }
     } catch (err) {
-      console.error('Send error:', err);
-      alert('Send failed. Your draft is still here.');
+      console.error('Send prep error:', err);
+      setSending(false);
+      showToast({ message: 'Could not read an attachment. Nothing was sent.', tone: 'error' });
+      return;
     }
+
+    // Snapshot so Undo (or a failed send) can put everything back
+    const snap = { body: replyBody, cc: ccField, bcc: bccField, showCcBcc, attachments, mode: replyMode, draftId };
+    const sendThreadId = threadId;
+
+    setReplyBody('');
+    setAttachments([]);
+    setCcField('');
+    setBccField('');
+    setShowCcBcc(false);
+    setShowComposer(false);
+    initialBodyRef.current = '';
     setSending(false);
+
+    const restore = async () => {
+      if (activeThreadRef.current === sendThreadId) {
+        setReplyMode(snap.mode);
+        setReplyBody(snap.body);
+        setCcField(snap.cc);
+        setBccField(snap.bcc);
+        setShowCcBcc(snap.showCcBcc);
+        setAttachments(snap.attachments);
+        setShowComposer(true);
+      } else {
+        // User moved on: keep the text as a saved draft on that thread
+        await fetch('/api/drafts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: snap.draftId, draft_type: 'reply', thread_id: sendThreadId, cc_address: snap.cc, bcc_address: snap.bcc, body_html: snap.body }),
+        }).catch(() => {});
+      }
+    };
+
+    runWithUndo({
+      message: 'Sending...',
+      delayMs: 5000,
+      onUndo: () => {
+        void restore();
+        showToast({ message: 'Sending undone', duration: 3000 });
+      },
+      run: async () => {
+        try {
+          const response = await fetch('/api/emails/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            await restore();
+            showToast({ message: `Send failed${err?.error ? `: ${err.error}` : ''}. Your reply was kept.`, tone: 'error', duration: 8000 });
+            return;
+          }
+          if (snap.draftId) fetch(`/api/drafts?id=${snap.draftId}`, { method: 'DELETE' }).catch(() => {});
+          showToast({ message: 'Message sent', duration: 3000 });
+          if (activeThreadRef.current === sendThreadId) {
+            setDraftId((cur) => (cur === snap.draftId ? null : cur));
+            inlineRegistryRef.current.clear();
+            await loadMessages();
+            setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }), 100);
+          }
+        } catch (err) {
+          console.error('Send error:', err);
+          await restore();
+          showToast({ message: 'Send failed. Your reply was kept.', tone: 'error', duration: 8000 });
+        }
+      },
+    });
   }
 
   const { flush: flushDraft } = useAutoSave({
@@ -842,12 +898,18 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
   /* ---------- per-message actions ---------- */
   async function handleMarkUnread() {
-    await fetch('/api/emails/mark-unread', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threadId }),
-    });
     setActiveActionMenu(null);
+    const ok = await threadAction([threadId], 'unread');
+    showToast(ok ? { message: 'Marked as unread', duration: 3000 } : { message: 'Could not mark unread', tone: 'error' });
+  }
+
+  async function headerAction(action: 'archive' | 'trash') {
+    const ok = await threadAction([threadId], action);
+    if (!ok) { showToast({ message: 'That did not work. Please try again.', tone: 'error' }); return; }
+    doWithUndo({
+      message: action === 'archive' ? 'Conversation archived' : 'Conversation moved to trash',
+      undo: () => threadAction([threadId], action === 'archive' ? 'unarchive' : 'restore').then(() => {}),
+    });
   }
 
   async function handleDeleteMessage(messageId: string) {
@@ -991,6 +1053,16 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
             </div>
           )}
 
+          <IconButton onClick={() => headerAction('archive')} title="Archive">
+            <Svg>{Icon.archive}</Svg>
+          </IconButton>
+          <IconButton onClick={() => headerAction('trash')} title="Move to trash">
+            <Svg>{Icon.trash}</Svg>
+          </IconButton>
+          <IconButton onClick={handleMarkUnread} title="Mark as unread">
+            <Svg>{Icon.unread}</Svg>
+          </IconButton>
+          <span className="w-px h-5 bg-[#e8eaed] mx-1" />
           {messages.length > 1 && (
             <IconButton onClick={toggleAll} title={allExpanded ? 'Collapse all (;)' : 'Expand all (;)'}>
               <Svg>{Icon.unfold}</Svg>
@@ -1283,7 +1355,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                   <IconButton onClick={handleAiAssist} title="Draft with AI">
                     <Svg className={`w-5 h-5 ${aiLoading ? 'animate-pulse text-[#1a73e8]' : ''}`}>{Icon.sparkle}</Svg>
                   </IconButton>
-                  <TemplatePicker inboxId={thread.inbox_id} onSelect={handleTemplateSelect} />
+                  <TemplatePicker inboxId={thread.inbox_id} onSelect={handleTemplateSelect} variant="icon" />
                   <div className="flex-1" />
                   <IconButton onClick={discardReply} title="Discard draft">
                     <Svg className="w-5 h-5">{Icon.trash}</Svg>
