@@ -36,11 +36,21 @@ export async function getTokensFromCode(code: string) {
 }
 
 // Create authenticated Gmail client
+// Reuse clients per refresh token within a warm serverless instance so the
+// OAuth access token is refreshed once and cached, not on every request.
+const gmailClientCache = new Map<string, ReturnType<typeof google.gmail>>();
+
 export function createGmailClient(refreshToken: string) {
+  const cached = gmailClientCache.get(refreshToken);
+  if (cached) return cached;
+
   const oauth2Client = createOAuth2Client();
   oauth2Client.setCredentials({ refresh_token: refreshToken });
-  
-  return google.gmail({ version: 'v1', auth: oauth2Client });
+  const client = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  if (gmailClientCache.size > 50) gmailClientCache.clear();
+  gmailClientCache.set(refreshToken, client);
+  return client;
 }
 
 // Get user's email address
