@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
-import AdvancedSearchPanel, { defaultConfig, hasActiveSearch, type SearchConfig, type SearchFilter, type FilterLogic } from './AdvancedSearchPanel';
 import type { EmailThread, Inbox, FilteredInbox, FilterRule, Contact } from '@/types';
 
 type EmailView = 'all' | 'unread' | 'starred' | 'sent' | 'trash';
@@ -33,9 +32,14 @@ export default function ThreadList({
   const [contactNames, setContactNames] = useState<Map<string, string>>(new Map());
   const [threadsWithAttachments, setThreadsWithAttachments] = useState<Set<string>>(new Set());
 
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchConfig, setSearchConfig] = useState<SearchConfig>(defaultConfig());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<EmailThread[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [searchSource, setSearchSource] = useState<'local' | 'gmail'>('local');
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchSeq = useRef(0);
+  const searchActive = searchQuery.trim().length > 0;
 
   const supabase = createClient();
   const { elementRef: listRef, startResize: startListResize } = useResizable(360, 240, 560, 'threadlist-width');
@@ -53,13 +57,47 @@ export default function ThreadList({
     return () => { supabase.removeChannel(channel); };
   }, [inbox.id, filteredInbox?.id, activeView]);
 
+  // Server-side search, debounced while typing
   useEffect(() => {
-    if (hasActiveSearch(searchConfig)) {
-      performSearch();
-    } else {
-      setDisplayedThreads(threads);
-    }
-  }, [searchConfig, threads]);
+    const q = searchQuery.trim();
+    if (!q) { setSearchResults(null); setSearching(false); setSearchError(null); return; }
+    const seq = ++searchSeq.current;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/emails/search?inboxId=${inbox.id}&q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (seq !== searchSeq.current) return;
+        if (!res.ok) { setSearchError(data.error || 'Search failed'); setSearchResults([]); }
+        else {
+          setSearchError(null);
+          setSearchResults(data.threads || []);
+          setSearchSource(data.source || 'local');
+          loadContactNames(data.threads || []);
+          loadThreadAttachments(data.threads || []);
+        }
+      } catch {
+        if (seq === searchSeq.current) { setSearchError('Search failed'); setSearchResults([]); }
+      }
+      if (seq === searchSeq.current) setSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, inbox.id]);
+
+  // New inbox: clear the search
+  useEffect(() => { setSearchQuery(''); }, [inbox.id]);
+
+  // "/" focuses search, Escape clears it (Gmail style)
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+      if (e.key === '/' && !typing) { e.preventDefault(); searchInputRef.current?.focus(); }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
 
   async function loadThreadAttachments(threadsList: EmailThread[]) {
     if (threadsList.length === 0) return;
@@ -72,57 +110,13 @@ export default function ThreadList({
       .limit(500);
     if (data) {
       const set = new Set(data.map((a: any) => a.thread_id as string));
-      setThreadsWithAttachments(set);
+      setThreadsWithAttachments((prev) => { const m = new Set(prev); set.forEach((id) => m.add(id)); return m; });
     }
   }
 
   function clearSearch() {
-    setSearchConfig(defaultConfig());
-    setDisplayedThreads(threads);
-  }
-
-  async function performSearch() {
-    if (!hasActiveSearch(searchConfig)) { setDisplayedThreads(threads); return; }
-    setSearching(true);
-
-    const threadIds = threads.map(t => t.id);
-    if (threadIds.length === 0) { setDisplayedThreads([]); setSearching(false); return; }
-
-    const { data: messages } = await supabase
-      .from('email_messages')
-      .select('thread_id, from_address, from_name, to_addresses, body_text, body_html')
-      .in('thread_id', threadIds);
-
-    const messagesByThread: Record<string, any[]> = {};
-    (messages || []).forEach(m => {
-      if (!messagesByThread[m.thread_id]) messagesByThread[m.thread_id] = [];
-      messagesByThread[m.thread_id].push(m);
-    });
-
-    function testFilter(thread: any, msgs: any[], filter: any): boolean {
-      const q = filter.query.toLowerCase().trim();
-      if (!q) return true;
-      const test = (str: string) => searchConfig.match === 'exact' ? str.toLowerCase() === q : str.toLowerCase().includes(q);
-      switch (filter.field) {
-        case 'from': return msgs.some(m => test(m.from_address || '') || test(m.from_name || ''));
-        case 'to': return msgs.some(m => (m.to_addresses || []).some((a: string) => test(a)));
-        case 'subject': return test(thread.subject || '');
-        case 'body': return msgs.some(m => test(m.body_text || '') || test(m.body_html || ''));
-        default: return test(thread.subject || '') ||
-          msgs.some(m => test(m.from_address || '') || test(m.from_name || '') || test(m.body_text || ''));
-      }
-    }
-
-    const activeFilters = searchConfig.filters.filter(f => f.query.trim());
-    const matchingThreads = threads.filter(thread => {
-      const msgs = messagesByThread[thread.id] || [];
-      if (searchConfig.logic === 'and') return activeFilters.every(f => testFilter(thread, msgs, f));
-      return activeFilters.some(f => testFilter(thread, msgs, f));
-    });
-
-    setDisplayedThreads(matchingThreads);
-    loadContactNames(matchingThreads);
-    setSearching(false);
+    setSearchQuery('');
+    setSearchResults(null);
   }
 
   
@@ -333,7 +327,7 @@ export default function ThreadList({
       }
     }
 
-    setContactNames(newContactNames);
+    setContactNames((prev) => { const m = new Map(prev); newContactNames.forEach((v: string, k: string) => m.set(k, v)); return m; });
   }
 
   async function handleSync() {
@@ -388,25 +382,27 @@ export default function ThreadList({
     if (!thread.is_read && onThreadRead) onThreadRead(thread.id);
   }
 
+  const visibleThreads = searchResults ?? displayedThreads;
+
   // Gmail-style list shortcuts: j/k move, # trash
   const listKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   listKeyRef.current = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement | null;
     if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (!['j', 'k', '#'].includes(e.key) || displayedThreads.length === 0) return;
-    const idx = displayedThreads.findIndex((th) => th.id === selectedThreadId);
+    if (!['j', 'k', '#'].includes(e.key) || visibleThreads.length === 0) return;
+    const idx = visibleThreads.findIndex((th) => th.id === selectedThreadId);
     if (e.key === '#') {
       if (idx < 0 || activeView === 'trash') return;
       e.preventDefault();
-      const next = displayedThreads[idx + 1] || displayedThreads[idx - 1];
-      handleDelete({ stopPropagation() {} } as React.MouseEvent, displayedThreads[idx].id);
+      const next = visibleThreads[idx + 1] || visibleThreads[idx - 1];
+      handleDelete({ stopPropagation() {} } as React.MouseEvent, visibleThreads[idx].id);
       if (next) selectThread(next);
       return;
     }
     e.preventDefault();
-    const nextIdx = e.key === 'j' ? Math.min(idx + 1, displayedThreads.length - 1) : Math.max(idx - 1, 0);
-    const target = displayedThreads[idx < 0 ? 0 : nextIdx];
+    const nextIdx = e.key === 'j' ? Math.min(idx + 1, visibleThreads.length - 1) : Math.max(idx - 1, 0);
+    const target = visibleThreads[idx < 0 ? 0 : nextIdx];
     if (!target) return;
     selectThread(target);
     listRef.current?.querySelector(`[data-thread-id="${target.id}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -440,33 +436,40 @@ export default function ThreadList({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowSearch(!showSearch)} className={`p-2 rounded-lg transition-all duration-150 ${showSearch || hasActiveSearch(searchConfig) ? 'bg-analog-accent text-white' : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text'}`} title="Search emails">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          </button>
           <button onClick={handleSync} disabled={syncing || !inbox.google_refresh_token} className="px-4 py-2 text-sm font-medium text-analog-text-muted bg-analog-surface border border-analog-border-strong rounded-lg hover:border-analog-accent hover:text-analog-accent transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed">
             {syncing ? 'Syncing...' : 'Sync'}
           </button>
         </div>
       </div>
 
-      {showSearch && (
-        <div className="px-4 py-3 border-b border-analog-border bg-analog-surface">
-          <AdvancedSearchPanel
-            config={searchConfig}
-            onChange={setSearchConfig}
-            resultCount={displayedThreads.length}
-            searching={searching}
+      <div className="px-3 pt-2.5 pb-2 border-b border-analog-border bg-white">
+        <div className={`flex items-center gap-2 h-10 px-3 rounded-full transition-colors ${searchActive ? 'bg-white ring-1 ring-[#dadce0] shadow-sm' : 'bg-[#eaf1fb] focus-within:bg-white focus-within:ring-1 focus-within:ring-[#dadce0] focus-within:shadow-sm'}`}>
+          <svg className="w-4 h-4 text-[#444746] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { clearSearch(); (e.target as HTMLInputElement).blur(); } }}
+            placeholder="Search mail  (from:  subject:  has:attachment)"
+            className="flex-1 min-w-0 bg-transparent text-sm text-[#202124] placeholder-[#5f6368] focus:outline-none"
           />
+          {searching && <span className="w-3.5 h-3.5 border-2 border-[#1a73e8] border-t-transparent rounded-full animate-spin flex-shrink-0" />}
+          {searchActive && (
+            <button onClick={clearSearch} className="p-1 rounded-full text-[#5f6368] hover:bg-[#f1f3f4]" title="Clear search (Esc)">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
         </div>
-      )}
-      {!showSearch && hasActiveSearch(searchConfig) && (
-        <div className="px-4 py-2 border-b border-analog-border bg-analog-accent/10 flex items-center justify-between">
-          <span className="text-sm text-analog-accent">{displayedThreads.length} result{displayedThreads.length !== 1 ? 's' : ''}</span>
-          <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline">Clear</button>
-        </div>
-      )}
+        {searchActive && searchResults && !searching && (
+          <div className="mt-1.5 px-2 text-xs text-[#5f6368]">
+            {searchError
+              ? <span className="text-[#d93025]">{searchError}</span>
+              : <>{searchResults.length} result{searchResults.length !== 1 ? 's' : ''}{searchSource === 'gmail' && searchResults.length > 0 ? ' found in Gmail' : ''}</>}
+          </div>
+        )}
+      </div>
 
-      <div className="px-3 py-2 border-b border-analog-border bg-white flex gap-1 overflow-x-auto">
+      <div className={`px-3 py-2 border-b border-analog-border bg-white gap-1 overflow-x-auto ${searchActive ? 'hidden' : 'flex'}`}>
         {views.map((view) => (
           <button key={view.key} onClick={() => setActiveView(view.key)} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium whitespace-nowrap transition-colors ${activeView === view.key ? 'bg-[#d3e3fd] text-[#041e49]' : 'text-[#444746] hover:bg-[#f1f3f4]'}`}>
             {view.icon}{view.label}
@@ -475,9 +478,9 @@ export default function ThreadList({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {loading ? (
+        {loading && !searchActive ? (
           <div className="p-6 text-center text-analog-text-muted">Loading emails...</div>
-        ) : displayedThreads.length === 0 ? (
+        ) : visibleThreads.length === 0 ? (
           <div className="p-6 text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-analog-surface flex items-center justify-center">
               <svg className="w-8 h-8 text-analog-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -485,16 +488,16 @@ export default function ThreadList({
               </svg>
             </div>
             <p className="text-analog-text-muted mb-2">
-              {hasActiveSearch(searchConfig) ? 'No results found' : (<>{activeView === 'all' && 'No emails yet'}{activeView === 'unread' && 'No unread emails'}{activeView === 'starred' && 'No starred emails'}{activeView === 'sent' && 'No sent emails'}{activeView === 'trash' && 'Trash is empty'}</>)}
+              {searchActive ? (searching ? 'Searching...' : 'No results in this inbox or Gmail') : (<>{activeView === 'all' && 'No emails yet'}{activeView === 'unread' && 'No unread emails'}{activeView === 'starred' && 'No starred emails'}{activeView === 'sent' && 'No sent emails'}{activeView === 'trash' && 'Trash is empty'}</>)}
             </p>
-            {hasActiveSearch(searchConfig) ? <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline font-medium">Clear search</button>
+            {searchActive ? <button onClick={clearSearch} className="text-sm text-analog-accent hover:underline font-medium">Clear search</button>
               : activeView === 'all' && inbox.google_refresh_token ? <button onClick={handleSync} className="text-sm text-analog-accent hover:underline font-medium">Sync from Gmail</button>
               : activeView === 'all' && !inbox.google_refresh_token ? <a href="/api/auth/google" className="text-sm text-analog-accent hover:underline font-medium">Connect Gmail first</a>
               : null}
           </div>
         ) : (
           <div>
-            {displayedThreads.map((thread) => {
+            {visibleThreads.map((thread) => {
               const isSelected = selectedThreadId === thread.id;
               const unread = !thread.is_read;
               return (
