@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
 import AdvancedSearchPanel, { defaultConfig, hasActiveSearch, type SearchConfig, type SearchFilter, type FilterLogic } from './AdvancedSearchPanel';
@@ -383,6 +383,40 @@ export default function ThreadList({
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
+  function selectThread(thread: { id: string; is_read: boolean }) {
+    onSelectThread(thread.id);
+    if (!thread.is_read && onThreadRead) onThreadRead(thread.id);
+  }
+
+  // Gmail-style list shortcuts: j/k move, # trash
+  const listKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  listKeyRef.current = (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!['j', 'k', '#'].includes(e.key) || displayedThreads.length === 0) return;
+    const idx = displayedThreads.findIndex((th) => th.id === selectedThreadId);
+    if (e.key === '#') {
+      if (idx < 0 || activeView === 'trash') return;
+      e.preventDefault();
+      const next = displayedThreads[idx + 1] || displayedThreads[idx - 1];
+      handleDelete({ stopPropagation() {} } as React.MouseEvent, displayedThreads[idx].id);
+      if (next) selectThread(next);
+      return;
+    }
+    e.preventDefault();
+    const nextIdx = e.key === 'j' ? Math.min(idx + 1, displayedThreads.length - 1) : Math.max(idx - 1, 0);
+    const target = displayedThreads[idx < 0 ? 0 : nextIdx];
+    if (!target) return;
+    selectThread(target);
+    listRef.current?.querySelector(`[data-thread-id="${target.id}"]`)?.scrollIntoView({ block: 'nearest' });
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => listKeyRef.current(e);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
   const views: { key: EmailView; label: string; icon: JSX.Element }[] = [
     { key: 'all', label: 'All', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg> },
     { key: 'unread', label: 'Unread', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /><circle cx="18" cy="6" r="3" fill="currentColor" /></svg> },
@@ -392,10 +426,10 @@ export default function ThreadList({
   ];
 
   return (
-    <div ref={listRef} className="border-r border-analog-border-light flex flex-col h-screen bg-analog-surface-alt flex-shrink-0 relative" style={{width: 360}}>
+    <div ref={listRef} className="border-r border-analog-border-light flex flex-col h-screen bg-white flex-shrink-0 relative" style={{width: 360}}>
       <div onMouseDown={startListResize} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-analog-accent/30 transition-colors z-10" />
 
-      <div className="px-6 py-5 border-b border-analog-border-light bg-analog-surface flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-analog-border-light bg-white flex items-center justify-between">
         <div>
           <h2 className="font-display text-lg font-medium text-analog-text">{filteredInbox ? filteredInbox.name : 'Emails'}</h2>
           {filteredInbox && (
@@ -432,9 +466,9 @@ export default function ThreadList({
         </div>
       )}
 
-      <div className="px-4 py-3 border-b border-analog-border bg-analog-surface flex gap-1 overflow-x-auto">
+      <div className="px-3 py-2 border-b border-analog-border bg-white flex gap-1 overflow-x-auto">
         {views.map((view) => (
-          <button key={view.key} onClick={() => setActiveView(view.key)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150 ${activeView === view.key ? 'bg-analog-accent text-white' : 'text-analog-text-muted hover:bg-analog-hover hover:text-analog-text'}`}>
+          <button key={view.key} onClick={() => setActiveView(view.key)} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium whitespace-nowrap transition-colors ${activeView === view.key ? 'bg-[#d3e3fd] text-[#041e49]' : 'text-[#444746] hover:bg-[#f1f3f4]'}`}>
             {view.icon}{view.label}
           </button>
         ))}
@@ -460,64 +494,70 @@ export default function ThreadList({
           </div>
         ) : (
           <div>
-            {displayedThreads.map((thread) => (
+            {displayedThreads.map((thread) => {
+              const isSelected = selectedThreadId === thread.id;
+              const unread = !thread.is_read;
+              return (
               <div
                 key={thread.id}
-                onClick={() => { onSelectThread(thread.id); if (!thread.is_read && onThreadRead) onThreadRead(thread.id); }}
-                className={`relative group cursor-pointer transition-all duration-150 ${selectedThreadId === thread.id ? 'bg-white shadow-[0_1px_4px_rgba(42,52,57,0.07)] border-l-4 border-l-analog-accent rounded-lg mx-2 mb-1' : 'bg-white rounded-lg mx-2 mb-1 hover:shadow-[0_1px_4px_rgba(42,52,57,0.07)] transition-shadow'}`}
+                data-thread-id={thread.id}
+                onClick={() => selectThread(thread)}
+                className={`relative group cursor-pointer border-b border-[#f1f3f4] ${isSelected ? 'bg-[#e8f0fe]' : 'bg-white hover:bg-[#f8f9fa] hover:shadow-[inset_1px_0_0_#dadce0,inset_-1px_0_0_#dadce0,0_1px_2px_rgba(60,64,67,.15)]'}`}
               >
-                <div className="px-6 py-5">
-                  <div className="flex items-start gap-3">
-                    <button
-                      onClick={(e) => handleStar(e, thread.id, thread.is_starred)}
-                      className={`mt-0.5 flex-shrink-0 transition-all duration-150 ${thread.is_starred ? 'text-analog-warning' : 'text-analog-border-strong hover:text-analog-warning opacity-0 group-hover:opacity-100'}`}
-                    >
-                      <svg className="w-4 h-4" fill={thread.is_starred ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                      </svg>
-                    </button>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs text-analog-text-muted mb-1 truncate font-medium">
-                        {contactNames.get(thread.id) || ''}
-                      </div>
-                      <div className="font-body text-[15px] font-medium text-analog-text mb-1.5 line-clamp-1">
-                        {thread.subject || '(No subject)'}
-                      </div>
-                      <div className="text-[13px] text-analog-text-faint line-clamp-2 leading-relaxed">
-                        {thread.snippet}
-                      </div>
-                      <div className="flex items-center gap-2.5 mt-3 pt-3 border-t border-analog-border-light">
-                        {!thread.is_read && <span className="badge badge-primary">New</span>}
-                        <span className="text-xs text-analog-text-placeholder">{formatDate(thread.last_message_at)}</span>
-                        {threadsWithAttachments.has(thread.id) && (
-                          <svg className="w-3.5 h-3.5 text-analog-text-faint flex-shrink-0 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
+                {isSelected && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#1a73e8]" />}
+                <div className="pl-3 pr-3 py-2 flex gap-2">
+                  <div className="w-3 pt-[7px] flex-shrink-0 flex justify-center">
+                    {unread && <span className="w-2 h-2 rounded-full bg-[#1a73e8]" title="Unread" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 h-5">
+                      <span className={`flex-1 min-w-0 truncate text-sm ${unread ? 'font-bold text-[#202124]' : 'text-[#3c4043]'}`}>
+                        {contactNames.get(thread.id) || 'Unknown sender'}
+                      </span>
+                      {threadsWithAttachments.has(thread.id) && (
+                        <svg className="w-3.5 h-3.5 text-[#5f6368] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        </svg>
+                      )}
+                      {thread.is_starred && (
+                        <svg className="w-3.5 h-3.5 text-[#f4b400] flex-shrink-0 group-hover:hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
+                      )}
+                      <span className={`text-xs flex-shrink-0 group-hover:hidden ${unread ? 'font-bold text-[#202124]' : 'text-[#5f6368]'}`}>
+                        {formatDate(thread.last_message_at)}
+                      </span>
+                      <div className="hidden group-hover:flex items-center gap-0.5 -mr-1">
+                        {activeView !== 'trash' && (
+                          <button onClick={(e) => handleStar(e, thread.id, thread.is_starred)} className={`p-1 rounded-full hover:bg-[#e8eaed] ${thread.is_starred ? 'text-[#f4b400]' : 'text-[#5f6368]'}`} title={thread.is_starred ? 'Unstar' : 'Star'}>
+                            <svg className="w-4 h-4" fill={thread.is_starred ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
+                          </button>
+                        )}
+                        {activeView === 'trash' ? (
+                          <>
+                            <button onClick={(e) => handleRestore(e, thread.id)} className="p-1 rounded-full text-[#5f6368] hover:bg-[#e8eaed] hover:text-[#202124]" title="Restore">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                            </button>
+                            <button onClick={(e) => handlePermanentDelete(e, thread.id)} className="p-1 rounded-full text-[#5f6368] hover:bg-[#e8eaed] hover:text-[#d93025]" title="Delete permanently">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                          </>
+                        ) : (
+                          <button onClick={(e) => handleDelete(e, thread.id)} className="p-1 rounded-full text-[#5f6368] hover:bg-[#e8eaed] hover:text-[#202124]" title="Move to trash (#)">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
                         )}
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {activeView === 'trash' ? (
-                        <>
-                          <button onClick={(e) => handleRestore(e, thread.id)} className="p-1.5 text-analog-text-muted hover:text-analog-success hover:bg-analog-success/10 rounded transition-all duration-150" title="Restore">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
-                          </button>
-                          <button onClick={(e) => handlePermanentDelete(e, thread.id)} className="p-1.5 text-analog-text-muted hover:text-analog-error hover:bg-analog-error/10 rounded transition-all duration-150" title="Delete permanently">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={(e) => handleDelete(e, thread.id)} className="p-1.5 text-analog-text-muted hover:text-analog-error hover:bg-analog-error/10 rounded transition-all duration-150" title="Move to trash">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                      )}
+                    <div className={`truncate text-[13px] leading-5 ${unread ? 'font-semibold text-[#202124]' : 'text-[#3c4043]'}`}>
+                      {thread.subject || '(No subject)'}
+                    </div>
+                    <div className="truncate text-[13px] leading-5 text-[#5f6368]">
+                      {thread.snippet}
                     </div>
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
