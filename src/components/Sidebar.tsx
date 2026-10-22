@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useResizable } from '@/hooks/useResizable';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
+import { NotificationBell } from './Notifier';
 import type { Inbox, User, FilteredInbox } from '@/types';
 
 interface InboxWithFilters extends Inbox {
@@ -596,6 +597,7 @@ export default function Sidebar({
             </p>
             <p className="text-xs text-analog-text-faint truncate">{currentUser.email}</p>
           </div>
+          <NotificationBell />
           <button
             onClick={onSignOut}
             className="p-2 text-analog-text-muted hover:text-analog-accent hover:bg-analog-surface-alt rounded-lg transition-all duration-150"

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { threadAction } from '@/lib/thread-actions';
 import { Toaster } from '@/lib/toast';
+import Notifier from '@/components/Notifier';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { User, FilteredInbox, Inbox } from '@/types';
@@ -239,6 +240,17 @@ export default function HomePage() {
       )}
 
       <Toaster />
+      <Notifier
+        currentUser={currentUser}
+        activeThreadId={selectedThreadId}
+        onOpenThread={(threadId, inboxId) => {
+          // Like handleSelectThread, but keeps an open compose window open
+          setShowAllInboxes(false);
+          setSelectedFilteredInboxId(null);
+          setSelectedInboxId(inboxId);
+          setSelectedThreadId(threadId);
+        }}
+      />
 
       {/* Compose Modal */}
       {showCompose && selectedInbox && currentUser && (
