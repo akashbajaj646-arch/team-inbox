@@ -477,7 +477,14 @@ export default function ThreadList({
 
   function selectThread(thread: { id: string; is_read: boolean }) {
     onSelectThread(thread.id);
-    if (!thread.is_read && onThreadRead) onThreadRead(thread.id);
+    if (!thread.is_read) {
+      // Show it as read right away; the database and Gmail update in the background
+      const mark = (list: EmailThread[]) => list.map((t) => (t.id === thread.id ? { ...t, is_read: true } : t));
+      setThreads(mark);
+      setDisplayedThreads(mark);
+      setSearchResults((prev) => (prev ? mark(prev) : prev));
+      if (onThreadRead) onThreadRead(thread.id);
+    }
   }
 
   const snoozeAware = activeView === 'inbox' || activeView === 'unread';
