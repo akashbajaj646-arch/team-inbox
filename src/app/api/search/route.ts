@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { parseSearchQuery, likePattern } from '@/lib/search-query';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,7 +102,8 @@ export async function GET(request: Request) {
     }
 
     // ── Search mode ───────────────────────────────────────────────────────
-    const q = query.toLowerCase().trim();
+    const smsText = parseSearchQuery(query).terms.join(' ').toLowerCase().trim();
+    const q = smsText.replace(/[,()*%\\]/g, ' ').trim();
 
     const emailInboxIds = inboxIds.filter(id => inboxMap[id]?.inbox_type === 'email');
     const smsInboxIds = inboxIds.filter(id =>
@@ -109,55 +111,64 @@ export async function GET(request: Request) {
     );
 
     if (emailInboxIds.length > 0) {
-      const { data: subjectThreads } = await supabase
-        .from('email_threads')
-        .select('id, subject, snippet, last_message_at, is_read, inbox_id')
-        .in('inbox_id', emailInboxIds)
-        .is('deleted_at', null)
-        .ilike('subject', `%${q}%`)
-        .order('last_message_at', { ascending: false })
-        .limit(20);
+      // Same engine as the per-inbox search, run for every inbox the user can access
+      const parsed = parseSearchQuery(query);
+      const svc = await createServiceClient();
+      const perInbox = await Promise.all(
+        emailInboxIds.map((inboxId) =>
+          svc.rpc('search_email_threads', {
+            p_inbox_id: inboxId,
+            p_terms: parsed.terms.map(likePattern),
+            p_from: parsed.from ? likePattern(parsed.from) : null,
+            p_to: parsed.to ? likePattern(parsed.to) : null,
+            p_subject: parsed.subject ? likePattern(parsed.subject) : null,
+            p_has_attachment: parsed.hasAttachment,
+            p_is_unread: parsed.isUnread ?? null,
+            p_is_starred: parsed.isStarred ?? null,
+            p_after: parsed.after ?? null,
+            p_before: parsed.before ?? null,
+            p_limit: 50,
+          })
+        )
+      );
+      perInbox.forEach((r) => { if (r.error) console.error('search rpc error:', r.error); });
+      const threadIds = perInbox.flatMap((r) => (r.data || []).map((h: { thread_id: string }) => h.thread_id));
 
-      const { data: messageMatches } = await supabase
-        .from('email_messages')
-        .select('thread_id, from_address, from_name, body_text')
-        .or(`from_address.ilike.%${q}%,from_name.ilike.%${q}%,body_text.ilike.%${q}%`)
-        .limit(50);
+      if (threadIds.length > 0) {
+        const [{ data: threads }, { data: senders }] = await Promise.all([
+          svc.from('email_threads')
+            .select('id, subject, snippet, last_message_at, is_read, inbox_id')
+            .in('id', threadIds),
+          svc.from('email_messages')
+            .select('thread_id, from_address, from_name, is_outbound, sent_at')
+            .in('thread_id', threadIds)
+            .order('sent_at', { ascending: false }),
+        ]);
 
-      const messageThreadIds = [...new Set((messageMatches || []).map(m => m.thread_id))];
+        // Show the most recent outside sender for each thread
+        const senderByThread: Record<string, string> = {};
+        for (const m of senders || []) {
+          if (senderByThread[m.thread_id] || m.is_outbound) continue;
+          senderByThread[m.thread_id] = m.from_name || m.from_address;
+        }
 
-      let messageThreads: any[] = [];
-      if (messageThreadIds.length > 0) {
-        const { data } = await supabase
-          .from('email_threads')
-          .select('id, subject, snippet, last_message_at, is_read, inbox_id')
-          .in('id', messageThreadIds)
-          .in('inbox_id', emailInboxIds)
-          .is('deleted_at', null)
-          .order('last_message_at', { ascending: false });
-        messageThreads = data || [];
-      }
-
-      const seen = new Set<string>();
-      for (const thread of [...(subjectThreads || []), ...messageThreads]) {
-        if (seen.has(thread.id)) continue;
-        seen.add(thread.id);
-        const matchingMsg = (messageMatches || []).find(m => m.thread_id === thread.id);
-        results.push({
-          id: thread.id,
-          type: 'email',
-          inbox_id: thread.inbox_id,
-          inbox_name: inboxMap[thread.inbox_id]?.name || 'Email',
-          subject: thread.subject || '(No subject)',
-          snippet: thread.snippet || '',
-          from: matchingMsg ? (matchingMsg.from_name || matchingMsg.from_address) : null,
-          last_message_at: thread.last_message_at,
-          is_read: thread.is_read,
-        });
+        for (const thread of threads || []) {
+          results.push({
+            id: thread.id,
+            type: 'email',
+            inbox_id: thread.inbox_id,
+            inbox_name: inboxMap[thread.inbox_id]?.name || 'Email',
+            subject: thread.subject || '(No subject)',
+            snippet: thread.snippet || '',
+            from: senderByThread[thread.id] || null,
+            last_message_at: thread.last_message_at,
+            is_read: thread.is_read,
+          });
+        }
       }
     }
 
-    if (smsInboxIds.length > 0) {
+    if (smsInboxIds.length > 0 && q) {
       const { data: smsThreads } = await supabase
         .from('sms_threads')
         .select('id, contact_phone, contact_name, last_message_preview, last_message_at, is_read, inbox_id')
@@ -207,7 +218,7 @@ export async function GET(request: Request) {
       new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
     );
 
-    return NextResponse.json({ results: results.slice(0, 50) });
+    return NextResponse.json({ results: results.slice(0, 100) });
   } catch (err) {
     console.error('Search error:', err);
     return NextResponse.json({ error: 'Search failed' }, { status: 500 });
