@@ -567,14 +567,21 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   className="w-full bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none resize-none leading-relaxed"
                   style={{ minHeight: '48px', maxHeight: '120px' }}
                 />
-                {showSkuPicker && (
-                  <SkuPicker
-                    searchQuery={skuSearchQuery}
-                    onSelect={handleSkuSelect}
-                    onClose={() => setShowSkuPicker(false)}
-                    position={{ top: -330, left: 0 }}
-                  />
-                )}
+                {showSkuPicker && (() => {
+                  // Fixed to the window: the reply box clips anything that overflows it
+                  const r = textareaRef.current?.getBoundingClientRect();
+                  const top = r ? Math.max(8, r.top - 330) : 80;
+                  const left = r ? Math.max(8, Math.min(r.left - 12, window.innerWidth - 370)) : 8;
+                  return (
+                    <SkuPicker
+                      fixed
+                      searchQuery={skuSearchQuery}
+                      onSelect={handleSkuSelect}
+                      onClose={() => setShowSkuPicker(false)}
+                      position={{ top, left }}
+                    />
+                  );
+                })()}
               </div>
               <div className="flex items-center justify-between px-3 py-2 border-t border-analog-border-light">
                 <div className="flex items-center gap-1">
