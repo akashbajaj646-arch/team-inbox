@@ -13,6 +13,12 @@ import type { User } from '@/types';
 
 const ENABLED_KEY = 'ti.notify.enabled';
 const listeners = new Set<() => void>();
+type ConnStatus = 'idle' | 'connecting' | 'live' | 'error' | 'standby';
+let connectionStatus: ConnStatus = 'idle';
+function setConnectionStatus(s: ConnStatus) {
+  connectionStatus = s;
+  listeners.forEach((l) => l());
+}
 
 export function notificationsEnabled(): boolean {
   try { return localStorage.getItem(ENABLED_KEY) !== '0'; } catch { return true; }
@@ -91,7 +97,8 @@ export default function Notifier({ currentUser, activeThreadId, onOpenThread }: 
   }, []);
 
   useEffect(() => {
-    if (!isLeader) return;
+    if (!isLeader) { setConnectionStatus('standby'); return; }
+    setConnectionStatus('connecting');
     let memberInboxes = new Map<string, { name: string; type: string }>();
     let cancelled = false;
 
@@ -165,62 +172,116 @@ export default function Notifier({ currentUser, activeThreadId, onOpenThread }: 
           inboxId: t.inbox_id,
         });
       })
-      .subscribe();
+      .subscribe((state: string, err?: Error) => {
+        if (state === 'SUBSCRIBED') setConnectionStatus('live');
+        else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') {
+          console.error('Notifications channel error:', state, err);
+          setConnectionStatus('error');
+        }
+      });
 
-    return () => { cancelled = true; supabase.removeChannel(channel); };
+    return () => { cancelled = true; supabase.removeChannel(channel); setConnectionStatus('idle'); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLeader, currentUser.id]);
 
   return null;
 }
 
-/** Bell toggle for the sidebar: asks for permission and turns pings on/off. */
+/** Shows a sample notification so permissions can be checked without waiting for a message. */
+export function sendTestNotification(): string {
+  playPing('message');
+  if (typeof Notification === 'undefined') return 'This browser does not support desktop notifications. You should have heard the sound.';
+  if (Notification.permission !== 'granted') return `Desktop pop-ups are ${Notification.permission === 'denied' ? 'blocked' : 'not allowed yet'} for this site. You should have heard the sound.`;
+  try {
+    new Notification('Team Inbox test', { body: 'If you can see this, desktop notifications are working.', tag: 'ti-test', silent: true, icon: '/favicon.ico' });
+    return 'Test sent. No pop-up? Check System Settings > Notifications > your browser, and turn off Focus / Do Not Disturb.';
+  } catch {
+    return 'The browser refused to show the pop-up.';
+  }
+}
+
+/** Bell in the sidebar: permission, mute toggle, test, and live connection status. */
 export function NotificationBell() {
   const [enabled, setEnabled] = useState(true);
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default');
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [status, setStatus] = useState(connectionStatus);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const sync = () => {
       setEnabled(notificationsEnabled());
       setPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+      setStatus(connectionStatus);
     };
     sync();
     listeners.add(sync);
     return () => { listeners.delete(sync); };
   }, []);
 
-  async function onClick() {
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!wrapRef.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  async function allow() {
     ensureAudio();
-    if (permission === 'default' && typeof Notification !== 'undefined') {
-      const p = await Notification.requestPermission();
-      setPermission(p);
-      setNotificationsEnabled(true);
-      if (p === 'granted') playPing('message');
-      return;
-    }
-    const next = !enabled;
-    setNotificationsEnabled(next);
-    if (next) playPing('message');
+    if (typeof Notification === 'undefined') return;
+    const p = await Notification.requestPermission();
+    setPermission(p);
+    setNotificationsEnabled(true);
+    if (p === 'granted') setNote(sendTestNotification());
   }
 
   const on = enabled && permission === 'granted';
-  const title =
-    permission === 'unsupported' ? 'This browser does not support notifications'
-    : permission === 'denied' ? 'Notifications are blocked in browser settings. Sound pings still play.'
-    : permission === 'default' ? 'Turn on desktop notifications'
-    : enabled ? 'Notifications on (click to mute)' : 'Notifications muted (click to turn on)';
+  const permLabel =
+    permission === 'unsupported' ? 'Not supported in this browser'
+    : permission === 'granted' ? 'Allowed'
+    : permission === 'denied' ? 'Blocked in browser settings'
+    : 'Not allowed yet';
+  const statusLabel = { idle: 'Not connected', connecting: 'Connecting...', live: 'Live', error: 'Connection failed', standby: 'Another tab is listening' }[status];
 
   return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`relative p-2 rounded-lg transition-colors ${on ? 'text-[#0b57d0] hover:bg-[#e8f0fe]' : 'text-analog-text-muted hover:bg-analog-surface-alt'}`}
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        {!enabled && <path strokeLinecap="round" d="M3 3l18 18" />}
-      </svg>
-      {permission === 'default' && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#d93025]" />}
-    </button>
+    <div className="relative" ref={wrapRef}>
+      <button
+        onClick={() => { ensureAudio(); setNote(null); setOpen((o) => !o); }}
+        title="Notifications"
+        className={`relative p-2 rounded-lg transition-colors ${on ? 'text-[#0b57d0] hover:bg-[#e8f0fe]' : 'text-analog-text-muted hover:bg-analog-surface-alt'}`}
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          {!enabled && <path strokeLinecap="round" d="M3 3l18 18" />}
+        </svg>
+        {permission === 'default' && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#d93025]" />}
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-2 w-72 bg-white border border-[#dadce0] rounded-xl shadow-xl p-3 z-50 text-sm">
+          <div className="font-medium text-[#202124] mb-2">Notifications</div>
+          <div className="space-y-1 text-xs text-[#5f6368] mb-3">
+            <div className="flex justify-between"><span>Desktop pop-ups</span><span className={permission === 'granted' ? 'text-[#188038]' : 'text-[#d93025]'}>{permLabel}</span></div>
+            <div className="flex justify-between"><span>Live updates</span><span className={status === 'live' || status === 'standby' ? 'text-[#188038]' : 'text-[#d93025]'}>{statusLabel}</span></div>
+            <div className="flex justify-between"><span>Pings</span><span>{enabled ? 'On' : 'Muted'}</span></div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {permission === 'default' && (
+              <button onClick={allow} className="h-8 px-3 rounded-full bg-[#0b57d0] text-white text-xs font-medium">Allow notifications</button>
+            )}
+            <button onClick={() => setNotificationsEnabled(!enabled)} className="h-8 px-3 rounded-full border border-[#dadce0] text-xs font-medium text-[#444746] hover:bg-[#f1f3f4]">
+              {enabled ? 'Mute' : 'Unmute'}
+            </button>
+            <button onClick={() => setNote(sendTestNotification())} className="h-8 px-3 rounded-full border border-[#dadce0] text-xs font-medium text-[#444746] hover:bg-[#f1f3f4]">
+              Send test
+            </button>
+          </div>
+          {permission === 'denied' && (
+            <p className="mt-2 text-xs text-[#5f6368]">Click the lock icon left of the address bar, set Notifications to Allow, then reload.</p>
+          )}
+          {note && <p className="mt-2 text-xs text-[#3c4043]">{note}</p>}
+        </div>
+      )}
+    </div>
   );
 }
