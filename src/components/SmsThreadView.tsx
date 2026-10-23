@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { SmsThread, SmsMessage, User, Inbox, Contact } from '@/types';
 import CommentSection from './CommentSection';
 import SkuPicker from './SkuPicker';
+import { skuQueryAt, insertSkuText } from '@/lib/sku-text';
 import CustomerCard from './CustomerCard';
 import TemplatePicker from './TemplatePicker';
 import { MAX_SMS_FILES, MAX_WHATSAPP_FILES, validateSmsAttachments, formatFileSize } from '@/lib/attachments';
@@ -17,6 +18,7 @@ interface Product {
   category: string | null;
   price: number | null;
   image_url: string | null;
+  url?: string;
 }
 
 interface SentByUser {
@@ -551,7 +553,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
                   value={newMessage}
                   onChange={(e) => {
                     setNewMessage(e.target.value);
-                    checkForSkuTrigger(e.target.value);
+                    checkForSkuTrigger(e.target.value, e.target.selectionStart ?? e.target.value.length);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey && !showSkuPicker) {
@@ -664,10 +666,10 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
     </div>
   );
 
-  function checkForSkuTrigger(text: string) {
-    const match = text.match(/\/sku:(\S*)$/);
-    if (match) {
-      setSkuSearchQuery(match[1]);
+  function checkForSkuTrigger(text: string, caret: number) {
+    const q = skuQueryAt(text, caret);
+    if (q !== null) {
+      setSkuSearchQuery(q);
       setShowSkuPicker(true);
     } else {
       setShowSkuPicker(false);
@@ -676,12 +678,16 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
   }
 
   function handleSkuSelect(product: Product) {
-    const productCatalogUrl = process.env.NEXT_PUBLIC_PRODUCT_CATALOG_URL || 'http://localhost:3002';
-    const productLink = `${productCatalogUrl}/product/${product.style_number}`;
-    const newText = newMessage.replace(/\/sku:\S*$/, productLink);
-    setNewMessage(newText);
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? newMessage.length;
+    const next = insertSkuText(newMessage, caret, product);
     setShowSkuPicker(false);
     setSkuSearchQuery('');
-    textareaRef.current?.focus();
+    if (!next) return;
+    setNewMessage(next.text);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(next.caret, next.caret);
+    });
   }
 }

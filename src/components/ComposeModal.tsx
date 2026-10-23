@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { Inbox, User } from '@/types';
 import TemplatePicker from './TemplatePicker';
 import SkuPicker from './SkuPicker';
+import { skuQueryAt, insertSkuText } from '@/lib/sku-text';
 import { runWithUndo, showToast } from '@/lib/toast';
 import { MAX_EMAIL_FILES, MAX_EMAIL_TOTAL_BYTES, validateEmailAttachments, formatFileSize, getTotalSize, MAX_SMS_FILES, MAX_WHATSAPP_FILES, validateSmsAttachments, isRiskyFile } from '@/lib/attachments';
 import { useAutoSave } from '@/lib/use-autosave';
@@ -26,6 +27,9 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const [skuQuery, setSkuQuery] = useState<string | null>(null);
   const [skuPos, setSkuPos] = useState({ top: 0, left: 0 });
   const skuAnchorRef = useRef<{ node: Text; start: number; end: number } | null>(null);
+  const smsTextRef = useRef<HTMLTextAreaElement>(null);
+  const [smsSkuQuery, setSmsSkuQuery] = useState<string | null>(null);
+  const [smsSkuPos, setSmsSkuPos] = useState({ top: 0, left: 0 });
   const [pendingSend, setPendingSend] = useState(false);
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
@@ -709,12 +713,38 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
               <div>
                 <label className="block text-xs font-semibold text-analog-text-faint mb-1.5">Message</label>
                 <textarea
+                  ref={smsTextRef}
                   value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Type your message..."
+                  onChange={(e) => {
+                    setMessage(e.target.value);
+                    const q = skuQueryAt(e.target.value, e.target.selectionStart ?? e.target.value.length);
+                    if (q !== null) {
+                      const r = e.target.getBoundingClientRect();
+                      setSmsSkuPos({ top: Math.min(r.bottom + 6, window.innerHeight - 330), left: Math.max(8, Math.min(r.left, window.innerWidth - 370)) });
+                    }
+                    setSmsSkuQuery(q);
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Escape' && smsSkuQuery !== null) { e.stopPropagation(); setSmsSkuQuery(null); } }}
+                  placeholder="Type your message...  (type /sku: to link a product)"
                   rows={6}
                   className="input w-full resize-none"
                 />
+                {smsSkuQuery !== null && (
+                  <SkuPicker
+                    fixed
+                    searchQuery={smsSkuQuery}
+                    position={smsSkuPos}
+                    onClose={() => setSmsSkuQuery(null)}
+                    onSelect={(product) => {
+                      const el = smsTextRef.current;
+                      const next = insertSkuText(message, el?.selectionStart ?? message.length, product);
+                      setSmsSkuQuery(null);
+                      if (!next) return;
+                      setMessage(next.text);
+                      requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(next.caret, next.caret); });
+                    }}
+                  />
+                )}
               </div>
               {(isSms || isWhatsApp) && (
                 <div>
