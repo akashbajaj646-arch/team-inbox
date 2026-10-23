@@ -409,3 +409,12 @@ body {
   color: var(--accent-primary);
   text-decoration: underline;
 }
+
+/* Links inside the reply editor and the compose window look like links while writing */
+.ProseMirror a,
+[contenteditable="true"] a {
+  color: #1a73e8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: text;
+}
