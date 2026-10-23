@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
 
 /**
- * Product search for the /sku: picker. Proxies to Advance HQ, which returns each style
+ * Product search for the //: picker. Proxies to Advance HQ, which returns each style
  * with a thumbnail and a signed link to its read-only style page.
  * Env: ADVANCE_HQ_URL (e.g. https://advance-hq.vercel.app), STYLE_LINK_SECRET (same value as in Advance HQ).
  */

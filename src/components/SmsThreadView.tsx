@@ -653,7 +653,7 @@ export default function SmsThreadView({ threadId, inbox, currentUser }: SmsThrea
               </div>
             </div>
             <p className="text-[10px] text-analog-text-placeholder mt-1.5 px-1">
-              {isWhatsApp ? 'Enter to send • Use template button for new conversations outside 24hr window' : 'Enter to send • Shift+Enter for new line • /sku: to insert product link'}
+              {isWhatsApp ? 'Enter to send • Use template button for new conversations outside 24hr window' : 'Enter to send • Shift+Enter for new line • //: to insert product link'}
             </p>
           </div>
         </div>

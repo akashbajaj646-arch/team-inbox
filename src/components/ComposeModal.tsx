@@ -23,7 +23,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const isWhatsApp = inbox.inbox_type === 'whatsapp';
 
   const [winMode, setWinMode] = useState<'normal' | 'min' | 'max'>('normal');
-  // /sku: product links in the email body
+  // //: product links in the email body
   const [skuQuery, setSkuQuery] = useState<string | null>(null);
   const [skuPos, setSkuPos] = useState({ top: 0, left: 0 });
   const skuAnchorRef = useRef<{ node: Text; start: number; end: number } | null>(null);
@@ -191,7 +191,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
     const node = range.startContainer;
     if (!range.collapsed || node.nodeType !== Node.TEXT_NODE || !editor.contains(node)) { setSkuQuery(null); return; }
     const before = (node.textContent || '').slice(0, range.startOffset);
-    const m = before.match(/\/sku:(\S*)$/);
+    const m = before.match(/(?:\/\/:|\/sku:)(\S*)$/);
     if (!m) { setSkuQuery(null); skuAnchorRef.current = null; return; }
     skuAnchorRef.current = { node: node as Text, start: range.startOffset - m[0].length, end: range.startOffset };
     const rect = range.getBoundingClientRect();
@@ -644,7 +644,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                   onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') checkSkuTrigger(); }}
                   className="w-full min-h-[220px] bg-transparent text-sm text-[#202124] focus:outline-none leading-relaxed"
                   style={{ wordBreak: 'break-word' }}
-                  data-placeholder="Write your message...  (type /sku: to link a product)"
+                  data-placeholder="Write your message...  (type //: to link a product)"
                 />
                 {skuQuery !== null && (
                   <SkuPicker
@@ -725,7 +725,7 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                     setSmsSkuQuery(q);
                   }}
                   onKeyDown={(e) => { if (e.key === 'Escape' && smsSkuQuery !== null) { e.stopPropagation(); setSmsSkuQuery(null); } }}
-                  placeholder="Type your message...  (type /sku: to link a product)"
+                  placeholder="Type your message...  (type //: to link a product)"
                   rows={6}
                   className="input w-full resize-none"
                 />
