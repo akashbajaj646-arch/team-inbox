@@ -11,6 +11,7 @@ export function insertSkuText(text: string, caret: number, product: { style_numb
   const m = before.match(/\/sku:\S*$/);
   if (!m || !product.url) return null;
   const start = caret - m[0].length;
-  const insert = `${product.style_number} ${product.url} `;
+  const nextIsSpace = /^\s/.test(text.slice(caret));
+  const insert = `${product.style_number} ${product.url}${nextIsSpace ? '' : ' '}`;
   return { text: text.slice(0, start) + insert + text.slice(caret), caret: start + insert.length };
 }
