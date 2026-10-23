@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Inbox, User } from '@/types';
 import TemplatePicker from './TemplatePicker';
+import SkuPicker from './SkuPicker';
 import { runWithUndo, showToast } from '@/lib/toast';
 import { MAX_EMAIL_FILES, MAX_EMAIL_TOTAL_BYTES, validateEmailAttachments, formatFileSize, getTotalSize, MAX_SMS_FILES, MAX_WHATSAPP_FILES, validateSmsAttachments, isRiskyFile } from '@/lib/attachments';
 import { useAutoSave } from '@/lib/use-autosave';
@@ -21,6 +22,10 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   const isWhatsApp = inbox.inbox_type === 'whatsapp';
 
   const [winMode, setWinMode] = useState<'normal' | 'min' | 'max'>('normal');
+  // /sku: product links in the email body
+  const [skuQuery, setSkuQuery] = useState<string | null>(null);
+  const [skuPos, setSkuPos] = useState({ top: 0, left: 0 });
+  const skuAnchorRef = useRef<{ node: Text; start: number; end: number } | null>(null);
   const [pendingSend, setPendingSend] = useState(false);
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
@@ -174,6 +179,54 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   }
 
   const sendGuardRef = useRef(false);
+  function checkSkuTrigger() {
+    const sel = window.getSelection();
+    const editor = editorRef.current;
+    if (!sel || sel.rangeCount === 0 || !editor) { setSkuQuery(null); return; }
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (!range.collapsed || node.nodeType !== Node.TEXT_NODE || !editor.contains(node)) { setSkuQuery(null); return; }
+    const before = (node.textContent || '').slice(0, range.startOffset);
+    const m = before.match(/\/sku:(\S*)$/);
+    if (!m) { setSkuQuery(null); skuAnchorRef.current = null; return; }
+    skuAnchorRef.current = { node: node as Text, start: range.startOffset - m[0].length, end: range.startOffset };
+    const rect = range.getBoundingClientRect();
+    setSkuPos({
+      top: Math.min(rect.bottom + 6, window.innerHeight - 330),
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 370)),
+    });
+    setSkuQuery(m[1]);
+  }
+
+  function insertSkuLink(product: { style_number: string; url?: string }) {
+    const anchor = skuAnchorRef.current;
+    if (!anchor || !product.url) return;
+    const { node, start } = anchor;
+    // The query may have grown since the anchor was recorded: remove up to the caret
+    const sel = window.getSelection();
+    const end = sel && sel.rangeCount && sel.getRangeAt(0).startContainer === node ? sel.getRangeAt(0).startOffset : anchor.end;
+    const range = document.createRange();
+    range.setStart(node, Math.min(start, node.length));
+    range.setEnd(node, Math.min(Math.max(end, start), node.length));
+    range.deleteContents();
+    const a = document.createElement('a');
+    a.href = product.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = product.style_number;
+    const space = document.createTextNode('\u00a0');
+    range.insertNode(space);
+    range.insertNode(a);
+    const after = document.createRange();
+    after.setStartAfter(space);
+    after.collapse(true);
+    sel?.removeAllRanges();
+    sel?.addRange(after);
+    editorRef.current?.focus();
+    skuAnchorRef.current = null;
+    setSkuQuery(null);
+  }
+
   async function handleSend() {
     if (sendGuardRef.current) return;
     sendGuardRef.current = true;
@@ -583,10 +636,21 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                   ref={editorRef}
                   contentEditable
                   suppressContentEditableWarning
+                  onInput={checkSkuTrigger}
+                  onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') checkSkuTrigger(); }}
                   className="w-full min-h-[220px] bg-transparent text-sm text-[#202124] focus:outline-none leading-relaxed"
                   style={{ wordBreak: 'break-word' }}
-                  data-placeholder="Write your message..."
+                  data-placeholder="Write your message...  (type /sku: to link a product)"
                 />
+                {skuQuery !== null && (
+                  <SkuPicker
+                    fixed
+                    searchQuery={skuQuery}
+                    position={skuPos}
+                    onSelect={insertSkuLink}
+                    onClose={() => { setSkuQuery(null); skuAnchorRef.current = null; }}
+                  />
+                )}
               </div>
 
               {/* Attachment list */}

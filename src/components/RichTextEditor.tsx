@@ -16,20 +16,19 @@ interface Product {
   category: string | null;
   price: number | null;
   image_url: string | null;
+  url?: string;
 }
 
 interface RichTextEditorProps {
   content: string;
   onChange: (html: string) => void;
   placeholder?: string;
-  productCatalogUrl?: string;
 }
 
 export default function RichTextEditor({ 
   content, 
   onChange, 
   placeholder = 'Write your reply...',
-  productCatalogUrl = 'http://localhost:3002'
 }: RichTextEditorProps) {
   const [linkUrl, setLinkUrl] = useState('');
   const [showLinkInput, setShowLinkInput] = useState(false);
@@ -38,6 +37,9 @@ export default function RichTextEditor({
   const [skuPickerPosition, setSkuPickerPosition] = useState({ top: 0, left: 0 });
   const [skuTriggerStart, setSkuTriggerStart] = useState<number | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  // onUpdate is captured once by useEditor, so read picker state through a ref
+  const skuOpenRef = useRef(false);
+  useEffect(() => { skuOpenRef.current = showSkuPicker; }, [showSkuPicker]);
 
   const editor = useEditor({
     extensions: [
@@ -99,7 +101,7 @@ export default function RichTextEditor({
       
       setShowSkuPicker(true);
     } else {
-      if (showSkuPicker) {
+      if (skuOpenRef.current) {
         setShowSkuPicker(false);
         setSkuSearchQuery('');
         setSkuTriggerStart(null);
@@ -108,7 +110,7 @@ export default function RichTextEditor({
   }
 
   function handleSkuSelect(product: Product) {
-    if (!editor || skuTriggerStart === null) return;
+    if (!editor || skuTriggerStart === null || !product.url) return;
     
     const { state } = editor;
     const { selection } = state;
@@ -126,7 +128,7 @@ export default function RichTextEditor({
             {
               type: 'link',
               attrs: {
-                href: `${productCatalogUrl}/product/${product.style_number}`,
+                href: product.url,
                 target: '_blank',
               },
             },

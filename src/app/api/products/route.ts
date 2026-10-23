@@ -1,58 +1,38 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-// Product database (Trade Show Portal Supabase)
-const productSupabaseUrl = process.env.NEXT_PUBLIC_PRODUCT_SUPABASE_URL!;
-const productSupabaseAnonKey = process.env.NEXT_PUBLIC_PRODUCT_SUPABASE_ANON_KEY!;
-
+/**
+ * Product search for the /sku: picker. Proxies to Advance HQ, which returns each style
+ * with a thumbnail and a signed link to its read-only style page.
+ * Env: ADVANCE_HQ_URL (e.g. https://advance-hq.vercel.app), STYLE_LINK_SECRET (same value as in Advance HQ).
+ */
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const query = searchParams.get('q') || '';
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!query || query.length < 2) {
-      return NextResponse.json({ products: [] });
+    const q = (new URL(request.url).searchParams.get('q') || '').trim();
+    if (q.length < 2) return NextResponse.json({ products: [] });
+
+    const base = process.env.ADVANCE_HQ_URL;
+    const key = process.env.STYLE_LINK_SECRET;
+    if (!base || !key) {
+      return NextResponse.json({ error: 'Product links are not configured (ADVANCE_HQ_URL / STYLE_LINK_SECRET)' }, { status: 500 });
     }
 
-    const productDb = createClient(productSupabaseUrl, productSupabaseAnonKey);
-
-    const { data: products, error } = await productDb
-      .from('products')
-      .select('product_id, style_number, description, category, price')
-      .or(`style_number.ilike.%${query}%,description.ilike.%${query}%`)
-      .order('style_number', { ascending: true })
-      .limit(10);
-
-    if (error) {
-      console.error('Product search error:', error);
-      return NextResponse.json({ error: 'Failed to search products' }, { status: 500 });
+    const res = await fetch(`${base.replace(/\/$/, '')}/api/style/search?q=${encodeURIComponent(q)}`, {
+      headers: { 'x-style-key': key },
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error('Advance HQ style search failed:', res.status, data);
+      return NextResponse.json({ error: data.error || 'Product search failed' }, { status: 502 });
     }
-
-    if (products && products.length > 0) {
-      const productIds = products.map(p => p.product_id);
-
-      const { data: images } = await productDb
-        .from('product_images')
-        .select('product_id, image_url')
-        .in('product_id', productIds)
-        .eq('sort_order', 0);
-
-      const imageMap: Record<string, string> = {};
-      images?.forEach(img => {
-        imageMap[img.product_id] = img.image_url;
-      });
-
-      const productsWithImages = products.map(p => ({
-        ...p,
-        image_url: imageMap[p.product_id] || null,
-      }));
-
-      return NextResponse.json({ products: productsWithImages });
-    }
-
-    return NextResponse.json({ products: products || [] });
+    return NextResponse.json({ products: data.products || [] });
   } catch (err) {
     console.error('Product search error:', err);
     return NextResponse.json({ error: 'Failed to search products' }, { status: 500 });

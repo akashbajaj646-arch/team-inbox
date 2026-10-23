@@ -9,6 +9,7 @@ interface Product {
   category: string | null;
   price: number | null;
   image_url: string | null;
+  url?: string;
 }
 
 interface SkuPickerProps {
@@ -16,12 +17,15 @@ interface SkuPickerProps {
   onSelect: (product: Product) => void;
   onClose: () => void;
   position: { top: number; left: number };
+  /** 'fixed' places the picker relative to the window (used by the compose window). */
+  fixed?: boolean;
 }
 
-export default function SkuPicker({ searchQuery, onSelect, onClose, position }: SkuPickerProps) {
+export default function SkuPicker({ searchQuery, onSelect, onClose, position, fixed }: SkuPickerProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,6 +77,7 @@ export default function SkuPicker({ searchQuery, onSelect, onClose, position }: 
     try {
       const response = await fetch(`/api/products?q=${encodeURIComponent(query)}`);
       const data = await response.json();
+      setError(response.ok ? null : data.error || 'Product search failed');
       setProducts(data.products || []);
     } catch (err) {
       console.error('Product search error:', err);
@@ -81,13 +86,10 @@ export default function SkuPicker({ searchQuery, onSelect, onClose, position }: 
     setLoading(false);
   }
 
-  // Get the base URL for product catalog
-  const productCatalogUrl = process.env.NEXT_PUBLIC_PRODUCT_CATALOG_URL || 'http://localhost:3002';
-
   return (
     <div
       ref={containerRef}
-      className="absolute z-50 bg-white border border-analog-border rounded-lg shadow-xl overflow-hidden"
+      className={`${fixed ? 'fixed z-[120]' : 'absolute z-50'} bg-white border border-analog-border rounded-lg shadow-xl overflow-hidden`}
       style={{
         top: position.top,
         left: position.left,
@@ -108,12 +110,13 @@ export default function SkuPicker({ searchQuery, onSelect, onClose, position }: 
           </div>
         ) : products.length === 0 ? (
           <div className="px-4 py-6 text-center text-analog-text-muted text-sm">
-            {searchQuery.length < 2 ? 'Type at least 2 characters...' : 'No products found'}
+            {error ? error : searchQuery.length < 2 ? 'Type at least 2 characters...' : 'No products found'}
           </div>
         ) : (
           products.map((product, index) => (
             <button
               key={product.product_id}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onSelect(product)}
               className={`w-full px-3 py-2 flex items-center gap-3 text-left transition-colors ${
                 index === selectedIndex
