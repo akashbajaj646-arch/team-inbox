@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import type { Contact } from '@/types';
 
 type Mode = 'email' | 'phone';
 
@@ -24,11 +23,6 @@ interface Props {
 
 // Remember display names for picked addresses across instances (To, Cc, reopened compose)
 const labelCache: Map<string, string> = new Map();
-
-function contactName(c: Contact): string {
-  const n = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
-  return n || c.company_name || '';
-}
 
 function splitTokens(v: string): string[] {
   return v.split(',').map(s => s.trim()).filter(Boolean);
@@ -68,20 +62,10 @@ export default function ContactAutocomplete({
     const id = ++reqId.current;
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/contacts?search=${encodeURIComponent(q)}`);
+        const res = await fetch(`/api/contacts/suggest?mode=${mode}&q=${encodeURIComponent(q)}`);
         const data = await res.json();
         if (id !== reqId.current) return;
-        const list: Option[] = [];
-        for (const c of (data.contacts || []) as Contact[]) {
-          const name = contactName(c);
-          if (mode === 'email') {
-            for (const e of [c.email_1, c.email_2, c.email_3]) {
-              if (e && !chips.includes(e)) list.push({ key: `${c.id}:${e}`, value: e, name, company: c.company_name });
-            }
-          } else if (c.phone_number) {
-            list.push({ key: c.id, value: c.phone_number, name, company: c.company_name });
-          }
-        }
+        const list: Option[] = ((data.results || []) as Option[]).filter(o => !chips.includes(o.value));
         setOptions(list.slice(0, 8));
         setActive(0);
         setOpen(list.length > 0);

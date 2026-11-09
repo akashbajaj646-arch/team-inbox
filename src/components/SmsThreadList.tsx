@@ -99,12 +99,12 @@ export default function SmsThreadList({
     if (uniquePhones.length > 0) {
       const { data: contacts } = await supabase
         .from('inbox_contacts')
-        .select('phone, first_name, last_name, company_name')
-        .not('phone', 'is', null);
+        .select('phone_number, first_name, last_name, company_name')
+        .not('phone_number', 'is', null);
 
       if (contacts) {
         for (const contact of contacts) {
-          const contactPhone = (contact.phone || '').replace(/\D/g, '');
+          const contactPhone = (contact.phone_number || '').replace(/\D/g, '');
           if (contactPhone && uniquePhones.includes(contactPhone)) {
             const parts = [];
             if (contact.first_name) parts.push(contact.first_name);
