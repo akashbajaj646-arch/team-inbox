@@ -330,6 +330,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [thread, setThread] = useState<EmailThread | null>(null);
   const [inbox, setInbox] = useState<Inbox | null>(null);
   const [messages, setMessages] = useState<EmailMessageWithUser[]>([]);
+  const repairTriedRef = useRef<string | null>(null);
   const [presence, setPresence] = useState<ThreadPresence[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -567,6 +568,21 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
       .select(`*, sent_by:inbox_users(id, name, email, avatar_url)`)
       .eq('thread_id', threadId)
       .order('sent_at', { ascending: true });
+
+    // Conversation saved without its emails: pull them from Gmail once, then reload
+    if ((!data || data.length === 0) && repairTriedRef.current !== threadId) {
+      repairTriedRef.current = threadId;
+      try {
+        const res = await fetch('/api/emails/repair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threadId }),
+        });
+        if (res.ok) return loadMessages();
+      } catch (err) {
+        console.error('Thread repair failed:', err);
+      }
+    }
 
     setMessages(data || []);
     if (data && data.length > 0) {

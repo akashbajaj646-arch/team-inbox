@@ -29,7 +29,7 @@ export async function importGmailThread(
   if (existing) {
     threadId = existing.id;
   } else {
-    const { data: created } = await svc
+    const { data: created, error: createErr } = await svc
       .from('email_threads')
       .insert({
         inbox_id: inbox.id,
@@ -42,7 +42,10 @@ export async function importGmailThread(
       })
       .select('id')
       .maybeSingle();
-    if (!created) return null;
+    if (!created) {
+      if (createErr) console.error('importGmailThread: thread insert failed', gmailThread.id, createErr);
+      return null;
+    }
     threadId = created.id;
   }
 
@@ -54,7 +57,7 @@ export async function importGmailThread(
     const split = (v?: string) =>
       (v || '').split(',').map((a: string) => parseEmailAddress(a.trim()).address).filter(Boolean);
 
-    const { data: inserted } = await svc
+    const { data: inserted, error: insertErr } = await svc
       .from('email_messages')
       .upsert(
         {
@@ -73,6 +76,8 @@ export async function importGmailThread(
       )
       .select('id')
       .maybeSingle();
+
+    if (insertErr) console.error('importGmailThread: message save failed', message.id, insertErr);
 
     // Only newly inserted messages get attachment rows, so nothing is duplicated
     if (inserted) {

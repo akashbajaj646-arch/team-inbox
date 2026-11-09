@@ -644,9 +644,10 @@ export async function sendNewEmail(
 export async function listHistory(
   refreshToken: string,
   startHistoryId: string
-): Promise<{ threadIds: string[]; expired: boolean }> {
+): Promise<{ threadIds: string[]; expired: boolean; latestHistoryId?: string }> {
   const gmail = createGmailClient(refreshToken);
   const threadIds = new Set<string>();
+  let latestHistoryId: string | undefined = undefined;
 
   try {
     let pageToken: string | undefined = undefined;
@@ -663,10 +664,11 @@ export async function listHistory(
           if (added.message?.threadId) threadIds.add(added.message.threadId);
         }
       }
+      if (res.data.historyId) latestHistoryId = String(res.data.historyId);
       pageToken = res.data.nextPageToken || undefined;
     } while (pageToken);
 
-    return { threadIds: Array.from(threadIds), expired: false };
+    return { threadIds: Array.from(threadIds), expired: false, latestHistoryId };
   } catch (err: any) {
     if (err?.code === 404 || err?.response?.status === 404) {
       return { threadIds: [], expired: true };

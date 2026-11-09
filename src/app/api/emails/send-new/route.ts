@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
-import { getThread, extractBody, sendNewEmail } from '@/lib/gmail';
+import { sendNewEmail } from '@/lib/gmail';
+import { importGmailThread } from '@/lib/gmail-import';
 import { google } from 'googleapis';
 
 export const dynamic = 'force-dynamic';
@@ -60,43 +61,26 @@ export async function POST(request: Request) {
       attachments,
     });
 
+    // Save the sent email the same way the Gmail sync does (handles Gmail adding it
+    // to an existing conversation), and never fail the request: the email already went out.
     if (sentMessage.threadId) {
-      const gmailThread = await getThread(inbox.google_refresh_token, sentMessage.threadId);
-      const firstMessage = gmailThread.messages?.[0];
-
-      if (firstMessage) {
-        const { data: newThread } = await serviceSupabase
-          .from('email_threads')
-          .insert({
-            inbox_id: inboxId,
-            gmail_thread_id: sentMessage.threadId,
-            subject,
-            snippet: body.replace(/<[^>]*>/g, '').slice(0, 100),
-            last_message_at: new Date().toISOString(),
-            is_read: true,
-            is_archived: false,
-          })
-          .select()
-          .single();
-
-        if (newThread) {
-          const msgBody = extractBody(firstMessage);
-          const ccAddresses = cc ? cc.split(',').map((e: string) => e.trim()).filter(Boolean) : [];
-
-          await serviceSupabase.from('email_messages').insert({
-            thread_id: newThread.id,
-            gmail_message_id: sentMessage.id,
-            from_address: inbox.email_address,
-            from_name: null,
-            to_addresses: String(to).split(',').map((e: string) => e.trim()).filter(Boolean),
-            cc_addresses: ccAddresses,
-            body_html: msgBody.html || body,
-            body_text: msgBody.text,
-            sent_at: new Date().toISOString(),
-            is_outbound: true,
-            sent_by_user_id: user.id,
-          });
+      try {
+        const localThreadId = await importGmailThread(serviceSupabase, inbox, sentMessage.threadId);
+        if (localThreadId) {
+          await serviceSupabase
+            .from('email_threads')
+            .update({ last_message_at: new Date().toISOString(), is_read: true, is_archived: false })
+            .eq('id', localThreadId);
+          const { error: tagErr } = await serviceSupabase
+            .from('email_messages')
+            .update({ sent_by_user_id: user.id, is_outbound: true })
+            .eq('gmail_message_id', sentMessage.id);
+          if (tagErr) console.error('send-new: could not tag sender', sentMessage.id, tagErr);
+        } else {
+          console.error('send-new: sent email not saved locally', sentMessage.threadId);
         }
+      } catch (err) {
+        console.error('send-new: saving sent email failed (email was sent)', sentMessage.threadId, err);
       }
     }
 

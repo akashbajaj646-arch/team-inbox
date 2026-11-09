@@ -23,6 +23,8 @@ import {
  * 3. Create a push subscription pointing to: https://your-domain.com/api/gmail/pubsub
  * 4. Call /api/gmail/watch for each inbox to register Gmail push notifications
  */
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -59,48 +61,108 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // Use Gmail history API to sync only threads that changed since last notification
-    let threadIdsToSync: string[] = [];
-    let useFallback = true;
+    // One sync per inbox at a time. Overlapping notifications used to save the same
+    // emails concurrently, block on each other's locks and hit the statement timeout.
+    // Every notification flags work as pending; whoever holds the lock keeps going
+    // until nothing is pending, so no notification is lost.
+    await supabase.from('inboxes').update({ sync_pending: true }).eq('id', inbox.id);
 
-    if (inbox.google_history_id) {
+    for (let pass = 0; pass < 5; pass++) {
+      const claimed = await claimSyncLock(supabase, inbox);
+      if (!claimed) break; // another run holds the lock and will pick up our pending flag
       try {
-        const { threadIds, expired } = await listHistory(
-          inbox.google_refresh_token,
-          inbox.google_history_id
-        );
-        if (!expired) {
-          threadIdsToSync = threadIds;
-          useFallback = false;
-        }
-      } catch (err) {
-        console.error('History list failed, falling back to recent threads:', err);
+        await supabase.from('inboxes').update({ sync_pending: false }).eq('id', inbox.id);
+        await syncPass(supabase, claimed, String(historyId));
+      } finally {
+        await supabase.from('inboxes').update({ sync_lock_until: null }).eq('id', inbox.id);
       }
+      const { data: state } = await supabase
+        .from('inboxes')
+        .select('sync_pending')
+        .eq('id', inbox.id)
+        .limit(1)
+        .maybeSingle();
+      if (!state?.sync_pending) break;
     }
-
-    if (useFallback) {
-      const { threads: gmailThreads } = await listThreads(
-        inbox.google_refresh_token,
-        { maxResults: 10 }
-      );
-      threadIdsToSync = gmailThreads.map((t: any) => t.id).filter(Boolean);
-    }
-
-    for (const changedThreadId of threadIdsToSync) {
-      await syncThread(supabase, inbox.id, inbox, changedThreadId);
-    }
-
-    // Update the stored historyId
-    await supabase
-      .from('inboxes')
-      .update({ google_history_id: String(historyId) })
-      .eq('id', inbox.id);
 
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('Pub/Sub webhook error:', err);
     // Always return 200 to prevent Pub/Sub from endlessly retrying
     return NextResponse.json({ ok: true });
+  }
+}
+
+function laterHistoryId(...ids: (string | null | undefined)[]): string | null {
+  let best: bigint | null = null;
+  for (const id of ids) {
+    if (!id) continue;
+    try {
+      const v = BigInt(id);
+      if (best === null || v > best) best = v;
+    } catch { /* ignore malformed ids */ }
+  }
+  return best === null ? null : best.toString();
+}
+
+// Atomically take the per-inbox sync lock. Returns the fresh inbox row, or null if
+// another run holds it. If the lock columns are missing, runs unlocked rather than stalling.
+async function claimSyncLock(supabase: any, inbox: any): Promise<any | null> {
+  const now = new Date().toISOString();
+  const until = new Date(Date.now() + 90_000).toISOString();
+  const { data, error } = await supabase
+    .from('inboxes')
+    .update({ sync_lock_until: until })
+    .eq('id', inbox.id)
+    .or(`sync_lock_until.is.null,sync_lock_until.lt.${now}`)
+    .select('*')
+    .maybeSingle();
+  if (error) {
+    console.error('pubsub: could not take sync lock, running unlocked', error);
+    return inbox;
+  }
+  return data;
+}
+
+async function syncPass(supabase: any, inbox: any, notifiedHistoryId: string) {
+  // Use Gmail history API to sync only threads that changed since the last sync
+  let threadIdsToSync: string[] = [];
+  let useFallback = true;
+  let latestHistoryId: string | undefined;
+
+  if (inbox.google_history_id) {
+    try {
+      const res = await listHistory(inbox.google_refresh_token, inbox.google_history_id);
+      if (!res.expired) {
+        threadIdsToSync = res.threadIds;
+        latestHistoryId = res.latestHistoryId;
+        useFallback = false;
+      }
+    } catch (err) {
+      console.error('History list failed, falling back to recent threads:', err);
+    }
+  }
+
+  if (useFallback) {
+    const { threads: gmailThreads } = await listThreads(
+      inbox.google_refresh_token,
+      { maxResults: 10 }
+    );
+    threadIdsToSync = gmailThreads.map((t: any) => t.id).filter(Boolean);
+  }
+
+  for (const changedThreadId of threadIdsToSync) {
+    try {
+      await syncThread(supabase, inbox.id, inbox, changedThreadId);
+    } catch (err) {
+      console.error('pubsub: thread sync failed', changedThreadId, err);
+    }
+  }
+
+  // Store the newest historyId we have seen (never move backwards)
+  const next = laterHistoryId(latestHistoryId, notifiedHistoryId, inbox.google_history_id);
+  if (next && next !== String(inbox.google_history_id)) {
+    await supabase.from('inboxes').update({ google_history_id: next }).eq('id', inbox.id);
   }
 }
 
@@ -152,7 +214,7 @@ async function syncThread(
     // Threads that existed before a filter was created get routed on their next message
     if (addedMessage) await routeThread(supabase, inboxId, existingThread.id);
   } else {
-    const { data: newThread } = await supabase
+    const { data: newThread, error: newThreadErr } = await supabase
       .from('email_threads')
       .upsert({
         inbox_id: inboxId,
@@ -166,6 +228,7 @@ async function syncThread(
       .select()
       .single();
 
+    if (newThreadErr) console.error('pubsub: thread save failed', gmailThread.id, newThreadErr);
     if (newThread) {
       for (const message of gmailThread.messages) {
         await insertMessage(supabase, newThread.id, message, inbox.email_address);
@@ -198,7 +261,7 @@ async function insertMessage(
 
   const isOutbound = from.address.toLowerCase() === inboxEmail.toLowerCase();
 
-  const { data: insertedMessage } = await supabase.from('email_messages').upsert({
+  const { data: insertedMessage, error: insertErr } = await supabase.from('email_messages').upsert({
     thread_id: threadId,
     gmail_message_id: message.id,
     from_address: from.address,
@@ -210,6 +273,7 @@ async function insertMessage(
     sent_at: new Date(parseInt(message.internalDate)).toISOString(),
     is_outbound: isOutbound,
   }, { onConflict: 'gmail_message_id', ignoreDuplicates: true }).select().maybeSingle();
+  if (insertErr) console.error('pubsub: message save failed', message.id, insertErr);
 
   // Save attachments
   if (insertedMessage) {

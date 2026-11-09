@@ -316,21 +316,24 @@ export default function ThreadList({
     const contactNameByEmail = new Map<string, string>();
     const { data: contacts } = await supabase
       .from('inbox_contacts')
-      .select('email, first_name, last_name, company_name')
-      .not('email', 'is', null);
+      .select('email_1, email_2, email_3, first_name, last_name, company_name')
+      .or('email_1.not.is.null,email_2.not.is.null,email_3.not.is.null');
 
     if (contacts) {
       for (const contact of contacts) {
-        const contactEmail = (contact.email || '').toLowerCase();
-        if (contactEmail && uniqueEmails.includes(contactEmail)) {
-          const parts = [];
-          if (contact.first_name) parts.push(contact.first_name);
-          if (contact.last_name) parts.push(contact.last_name);
-          const name = parts.join(' ');
-          const displayName = name && contact.company_name
-            ? `${name} (${contact.company_name})`
-            : name || contact.company_name || '';
-          if (displayName) contactNameByEmail.set(contactEmail, displayName);
+        const parts = [];
+        if (contact.first_name) parts.push(contact.first_name);
+        if (contact.last_name) parts.push(contact.last_name);
+        const name = parts.join(' ');
+        const displayName = name && contact.company_name
+          ? `${name} (${contact.company_name})`
+          : name || contact.company_name || '';
+        if (!displayName) continue;
+        for (const e of [contact.email_1, contact.email_2, contact.email_3]) {
+          const contactEmail = (e || '').toLowerCase();
+          if (contactEmail && uniqueEmails.includes(contactEmail)) {
+            contactNameByEmail.set(contactEmail, displayName);
+          }
         }
       }
     }

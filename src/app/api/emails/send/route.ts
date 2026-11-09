@@ -164,7 +164,7 @@ export async function POST(request: Request) {
     if (newMessage) {
       const newBody = extractBody(newMessage);
 
-      const { data: insertedMessage } = await supabase
+      const { data: insertedMessage, error: insertedErr } = await supabase
         .from('email_messages')
         .upsert({
           thread_id: threadId,
@@ -181,6 +181,7 @@ export async function POST(request: Request) {
         }, { onConflict: 'gmail_message_id', ignoreDuplicates: true })
         .select()
         .maybeSingle();
+      if (insertedErr) console.error('send: reply save failed', newMessage.id, insertedErr);
 
       // Persist outbound attachments so they appear in the thread view
       if (insertedMessage && attachments.length > 0) {
