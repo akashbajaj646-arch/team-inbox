@@ -88,7 +88,7 @@ export async function POST(request: Request) {
             gmail_message_id: sentMessage.id,
             from_address: inbox.email_address,
             from_name: null,
-            to_addresses: [to],
+            to_addresses: String(to).split(',').map((e: string) => e.trim()).filter(Boolean),
             cc_addresses: ccAddresses,
             body_html: msgBody.html || body,
             body_text: msgBody.text,

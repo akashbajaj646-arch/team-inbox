@@ -63,9 +63,16 @@ export async function POST(request: Request) {
       ? `whatsapp:${inbox.twilio_phone_number}`
       : inbox.twilio_phone_number;
 
+    // Normalize to E.164 before sending (contact numbers may be stored formatted)
+    let cleanPhone = toPhone.replace('whatsapp:', '').replace(/[^\d+]/g, '');
+    const digits = cleanPhone.replace(/\D/g, '');
+    if (digits.length === 10) cleanPhone = `+1${digits}`;
+    else if (digits.length === 11 && digits.startsWith('1')) cleanPhone = `+${digits}`;
+    else if (!cleanPhone.startsWith('+')) cleanPhone = `+${digits}`;
+
     const toNumber = channel === 'whatsapp'
-      ? `whatsapp:${toPhone}`
-      : toPhone;
+      ? `whatsapp:${cleanPhone}`
+      : cleanPhone;
 
     // Send via Twilio
     const safeBody = normalizeToGsm(body);
@@ -77,12 +84,7 @@ export async function POST(request: Request) {
       statusCallback: `${process.env.NEXT_PUBLIC_APP_URL || 'https://team-inbox-khaki.vercel.app'}/api/sms/status`,
     });
 
-    // Find or create thread (normalize to E.164: +1XXXXXXXXXX)
-    let cleanPhone = toPhone.replace('whatsapp:', '').replace(/[^\d+]/g, '');
-    const digits = cleanPhone.replace(/\D/g, '');
-    if (digits.length === 10) cleanPhone = `+1${digits}`;
-    else if (digits.length === 11 && digits.startsWith('1')) cleanPhone = `+${digits}`;
-    else if (!cleanPhone.startsWith('+')) cleanPhone = `+${digits}`;
+    // Find or create thread (cleanPhone normalized above)
     let { data: thread } = await supabase
       .from('sms_threads')
       .select('*')

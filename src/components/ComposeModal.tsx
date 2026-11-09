@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import ContactAutocomplete from './ContactAutocomplete';
 import type { Inbox, User } from '@/types';
 import TemplatePicker from './TemplatePicker';
 import SkuPicker from './SkuPicker';
@@ -474,12 +475,12 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
               {/* To */}
               <div className="flex items-center gap-3 px-5 py-3">
                 <span className="text-xs font-semibold text-analog-text-faint w-12 flex-shrink-0">To</span>
-                <input
-                  type="email"
+                <ContactAutocomplete
+                  mode="email"
+                  multiple
                   value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  placeholder="recipient@example.com"
-                  className="flex-1 bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none"
+                  onChange={setTo}
+                  placeholder="Name, company, or email"
                   autoFocus
                 />
                 {!showCc && (
@@ -491,12 +492,12 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
               {showCc && (
                 <div className="flex items-center gap-3 px-5 py-3">
                   <span className="text-xs font-semibold text-analog-text-faint w-12 flex-shrink-0">Cc</span>
-                  <input
-                    type="email"
+                  <ContactAutocomplete
+                    mode="email"
+                    multiple
                     value={cc}
-                    onChange={(e) => setCc(e.target.value)}
-                    placeholder="cc@example.com"
-                    className="flex-1 bg-transparent text-sm text-analog-text placeholder-analog-text-placeholder focus:outline-none"
+                    onChange={setCc}
+                    placeholder="Name, company, or email"
                     autoFocus
                   />
                 </div>
@@ -701,14 +702,15 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                 <label className="block text-xs font-semibold text-analog-text-faint mb-1.5">
                   {isWhatsApp ? 'WhatsApp Number' : 'Phone Number'}
                 </label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 (555) 000-0000"
-                  className="input w-full"
-                  autoFocus
-                />
+                <div className="input w-full flex">
+                  <ContactAutocomplete
+                    mode="phone"
+                    value={phone}
+                    onChange={setPhone}
+                    placeholder="Name, company, or +1 (555) 000-0000"
+                    autoFocus
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-analog-text-faint mb-1.5">Message</label>
