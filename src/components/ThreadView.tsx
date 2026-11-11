@@ -202,7 +202,7 @@ function EmailBody({ html, text, cidMap }: { html: string | null; text: string |
   const source = useMemo(() => {
     if (html) {
       // Inline images reference attachments by Content-ID; point them at our attachment proxy
-      return html.replace(/(src\s*=\s*["'])cid:([^"']+)(["'])/gi, (m, pre, cid, post) => {
+      return html.replace(/<img[^>]*\/api\/track\/open\/[^>]*>/gi, '').replace(/(src\s*=\s*["'])cid:([^"']+)(["'])/gi, (m, pre, cid, post) => {
         const id = cidMap?.[cid.trim().toLowerCase()];
         return id ? `${pre}/api/gmail/attachment?id=${id}&inline=1${post}` : m;
       });
@@ -355,6 +355,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
   const [messageAttachments, setMessageAttachments] = useState<Record<string, EmailAttachment[]>>({});
   const [messageCids, setMessageCids] = useState<Record<string, Record<string, string>>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [tracking, setTracking] = useState<Record<string, any>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -588,7 +589,26 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     if (data && data.length > 0) {
       await loadAttachmentsForMessages(data.map((m: any) => m.id));
     }
+    loadTracking();
   }
+
+  async function loadTracking() {
+    const forThread = threadId;
+    try {
+      const res = await fetch(`/api/track/summary?threadId=${forThread}`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (activeThreadRef.current === forThread) setTracking(json.tracking || {});
+    } catch {}
+  }
+
+  // Refresh open/click stats every minute while the thread is open
+  useEffect(() => {
+    setTracking({});
+    const t = setInterval(loadTracking, 60_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
 
   async function loadAttachmentsForMessages(messageIds: string[]) {
     if (messageIds.length === 0) return;
@@ -1195,6 +1215,28 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                               {message.sent_by.name?.split(' ')[0] || message.sent_by.email.split('@')[0]}
                             </span>
                           )}
+                          {message.is_outbound && tracking[message.gmail_message_id] && (() => {
+                            const t = tracking[message.gmail_message_id];
+                            const opened = t.open_count > 0;
+                            const tip = [
+                              opened ? `Opened ${t.open_count}x` : 'Not opened yet',
+                              t.first_opened_at ? `First opened: ${new Date(t.first_opened_at).toLocaleString()}` : '',
+                              t.last_opened_at ? `Last opened: ${new Date(t.last_opened_at).toLocaleString()}` : '',
+                              t.click_count > 0 ? `${t.click_count} link click${t.click_count === 1 ? '' : 's'}:` : '',
+                              ...(t.links || []).map((l: any) => `  ${l.click_count}x ${l.url}`),
+                              'Opens are approximate (Apple Mail can auto-open)',
+                            ].filter(Boolean).join('\n');
+                            return (
+                              <span
+                                className={`ml-1 flex-shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${opened ? 'bg-[#e6f4ea] text-[#137333]' : 'bg-[#f1f3f4] text-[#5f6368]'}`}
+                                title={tip}
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                                {opened ? `${t.open_count}x` : 'Unopened'}
+                                {t.click_count > 0 && <span>· {t.click_count} click{t.click_count === 1 ? '' : 's'}</span>}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="text-xs text-[#5f6368] truncate" title={[to.length ? `To: ${to.join(', ')}` : '', cc.length ? `Cc: ${cc.join(', ')}` : ''].filter(Boolean).join('\n')}>
                           to {to.length ? to.map(displayName).join(', ') : 'undisclosed recipients'}

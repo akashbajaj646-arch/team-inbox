@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { sendReply, getThread, parseHeaders, extractBody, parseEmailAddress, extractAttachments } from '@/lib/gmail';
+import { prepareTracking, finalizeTracking, discardTracking } from '@/lib/email-tracking';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,12 +129,21 @@ export async function POST(request: Request) {
       subject = `Re: ${subject}`;
     }
 
+    // Add open + click tracking (skipped for internal-only emails)
+    const { html: trackedBody, trackingId } = await prepareTracking(serviceSupabase, {
+      inboxId: inbox.id,
+      recipients: [toAddress, cc || '', bcc || ''],
+      html: body,
+    });
+
     // Send the reply via Gmail
-    const sentMessage = await sendReply(inbox.google_refresh_token, {
+    let sentMessage;
+    try {
+    sentMessage = await sendReply(inbox.google_refresh_token, {
       threadId: thread.gmail_thread_id,
       to: toAddress,
       subject,
-      body,
+      body: trackedBody,
       cc: cc || undefined,
       bcc: bcc || undefined,
       inReplyTo: headers['message-id'],
@@ -142,6 +152,11 @@ export async function POST(request: Request) {
         : headers['message-id'],
       attachments,
     });
+    } catch (sendErr) {
+      await discardTracking(serviceSupabase, trackingId);
+      throw sendErr;
+    }
+    if (sentMessage.id) await finalizeTracking(serviceSupabase, trackingId, sentMessage.id);
 
     // Parse CC addresses for storage
     const ccAddresses = cc 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { sendNewEmail } from '@/lib/gmail';
 import { importGmailThread } from '@/lib/gmail-import';
+import { prepareTracking, finalizeTracking, discardTracking } from '@/lib/email-tracking';
 import { google } from 'googleapis';
 
 export const dynamic = 'force-dynamic';
@@ -52,14 +53,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Inbox not connected to Google' }, { status: 400 });
     }
 
-    const sentMessage = await sendNewEmail(inbox.google_refresh_token, {
-      to,
-      cc: cc || undefined,
-      bcc: bcc || undefined,
-      subject,
-      body,
-      attachments,
+    // Add open + click tracking (skipped for internal-only emails)
+    const { html: trackedBody, trackingId } = await prepareTracking(serviceSupabase, {
+      inboxId: inbox.id,
+      recipients: [to, cc || '', bcc || ''],
+      html: body,
     });
+
+    let sentMessage;
+    try {
+      sentMessage = await sendNewEmail(inbox.google_refresh_token, {
+        to,
+        cc: cc || undefined,
+        bcc: bcc || undefined,
+        subject,
+        body: trackedBody,
+        attachments,
+      });
+    } catch (sendErr) {
+      await discardTracking(serviceSupabase, trackingId);
+      throw sendErr;
+    }
+    if (sentMessage.id) await finalizeTracking(serviceSupabase, trackingId, sentMessage.id);
 
     // Save the sent email the same way the Gmail sync does (handles Gmail adding it
     // to an existing conversation), and never fail the request: the email already went out.
