@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { sendReply, getThread, parseHeaders, extractBody, parseEmailAddress, extractAttachments } from '@/lib/gmail';
 import { prepareTracking, finalizeTracking, discardTracking } from '@/lib/email-tracking';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,7 +131,7 @@ export async function POST(request: Request) {
     }
 
     // Add open + click tracking (skipped for internal-only emails)
-    const { html: trackedBody, trackingId } = await prepareTracking(serviceSupabase, {
+    const { html: trackedBody, trackingId } = await prepareTracking(createAdminClient(), {
       inboxId: inbox.id,
       recipients: [toAddress, cc || '', bcc || ''],
       html: body,
@@ -153,10 +154,10 @@ export async function POST(request: Request) {
       attachments,
     });
     } catch (sendErr) {
-      await discardTracking(serviceSupabase, trackingId);
+      await discardTracking(createAdminClient(), trackingId);
       throw sendErr;
     }
-    if (sentMessage.id) await finalizeTracking(serviceSupabase, trackingId, sentMessage.id);
+    if (sentMessage.id) await finalizeTracking(createAdminClient(), trackingId, sentMessage.id);
 
     // Parse CC addresses for storage
     const ccAddresses = cc 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { BOT_UA, TRACKING_GRACE_MS } from '@/lib/email-tracking';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     const { data: { user } } = await supabase.auth.getUser();
     if (user) return pixelResponse();
 
-    const service = await createServiceClient();
+    const service = createAdminClient();
     const { data: tracking } = await service
       .from('email_tracking')
       .select('id, sent_at')

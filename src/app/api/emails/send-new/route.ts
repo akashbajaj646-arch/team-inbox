@@ -3,6 +3,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { sendNewEmail } from '@/lib/gmail';
 import { importGmailThread } from '@/lib/gmail-import';
 import { prepareTracking, finalizeTracking, discardTracking } from '@/lib/email-tracking';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { google } from 'googleapis';
 
 export const dynamic = 'force-dynamic';
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
     }
 
     // Add open + click tracking (skipped for internal-only emails)
-    const { html: trackedBody, trackingId } = await prepareTracking(serviceSupabase, {
+    const { html: trackedBody, trackingId } = await prepareTracking(createAdminClient(), {
       inboxId: inbox.id,
       recipients: [to, cc || '', bcc || ''],
       html: body,
@@ -71,10 +72,10 @@ export async function POST(request: Request) {
         attachments,
       });
     } catch (sendErr) {
-      await discardTracking(serviceSupabase, trackingId);
+      await discardTracking(createAdminClient(), trackingId);
       throw sendErr;
     }
-    if (sentMessage.id) await finalizeTracking(serviceSupabase, trackingId, sentMessage.id);
+    if (sentMessage.id) await finalizeTracking(createAdminClient(), trackingId, sentMessage.id);
 
     // Save the sent email the same way the Gmail sync does (handles Gmail adding it
     // to an existing conversation), and never fail the request: the email already went out.

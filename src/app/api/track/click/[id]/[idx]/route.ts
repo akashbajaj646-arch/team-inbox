@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { BOT_UA, TRACKING_GRACE_MS } from '@/lib/email-tracking';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,7 @@ export async function GET(request: Request, { params }: { params: { id: string; 
     return NextResponse.redirect(FALLBACK_URL, 302);
   }
 
-  const service = await createServiceClient();
+  const service = createAdminClient();
   const { data: link } = await service
     .from('email_tracking_links')
     .select('url, tracking:email_tracking(sent_at)')
