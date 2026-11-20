@@ -40,6 +40,36 @@ function encodeAttr(s: string) {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
+// Turn plain-text URLs into real links so their clicks can be tracked.
+// Only touches text outside tags, and never text already inside a link, style or script.
+export function linkifyBareUrls(html: string): string {
+  const parts = html.split(/(<[^>]+>)/g);
+  let inAnchor = 0;
+  let inRaw = 0;
+  return parts
+    .map((part) => {
+      if (part.startsWith('<')) {
+        const tag = part.toLowerCase();
+        if (/^<a[\s>]/.test(tag)) inAnchor++;
+        else if (tag.startsWith('</a')) inAnchor = Math.max(0, inAnchor - 1);
+        else if (/^<(style|script)[\s>]/.test(tag)) inRaw++;
+        else if (/^<\/(style|script)/.test(tag)) inRaw = Math.max(0, inRaw - 1);
+        return part;
+      }
+      if (inAnchor || inRaw || !part) return part;
+      return part.replace(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi, (raw) => {
+        // Keep trailing punctuation outside the link
+        const m = raw.match(/^(.*?)([.,;:!?)\]]*)$/);
+        const url = m ? m[1] : raw;
+        const trail = m ? m[2] : '';
+        if (!url || /^(https?:\/\/|www\.)$/i.test(url)) return raw;
+        const href = /^www\./i.test(url) ? `https://${url}` : url;
+        return `<a href="${href.replace(/"/g, '&quot;')}">${url}</a>${trail}`;
+      });
+    })
+    .join('');
+}
+
 // Remove pixels and restore original links from earlier tracked emails (quoted history, forwards)
 async function cleanOldTracking(service: any, html: string): Promise<string> {
   let out = html.replace(PIXEL_RE, '');
@@ -86,9 +116,9 @@ export async function prepareTracking(
     }
     const trackingId: string = row.id;
 
-    // Rewrite http(s) links to go through the click tracker
+    // Rewrite http(s) links to go through the click tracker (plain-text URLs become links first)
     const links: { tracking_id: string; idx: number; url: string }[] = [];
-    let html = cleaned.replace(
+    let html = linkifyBareUrls(cleaned).replace(
       /(<a\b[^>]*?\bhref\s*=\s*)(["'])(https?:\/\/[^"']+)\2/gi,
       (full, pre, quote, href) => {
         const url = decodeEntities(href);
