@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
       const { data: threads, error } = await svc
         .from('email_threads')
-        .select('id, inbox_id, gmail_thread_id')
+        .select('id, inbox_id, gmail_thread_id, last_message_at')
         .in('inbox_id', Array.from(allowed))
         .gte('last_message_at', since)
         .not('gmail_thread_id', 'is', null)
@@ -61,15 +61,23 @@ export async function POST(request: Request) {
       }
 
       const ids = (threads || []).map((t: any) => t.id);
-      const withMessages = new Set<string>();
+      const newestSaved = new Map<string, number>();
       for (let i = 0; i < ids.length; i += 100) {
         const { data } = await svc
           .from('email_messages')
-          .select('thread_id')
+          .select('thread_id, sent_at')
           .in('thread_id', ids.slice(i, i + 100));
-        for (const m of data || []) withMessages.add((m as any).thread_id);
+        for (const m of data || []) {
+          const ts = new Date((m as any).sent_at).getTime();
+          const prev = newestSaved.get((m as any).thread_id);
+          if (prev === undefined || ts > prev) newestSaved.set((m as any).thread_id, ts);
+        }
       }
-      targets = ((threads || []) as Target[]).filter((t) => !withMessages.has(t.id));
+      // Empty threads, plus threads whose newest email is missing (2 min tolerance)
+      targets = ((threads || []) as any[]).filter((t) => {
+        const newest = newestSaved.get(t.id);
+        return newest === undefined || new Date(t.last_message_at).getTime() - newest > 120_000;
+      }) as Target[];
     } else {
       return NextResponse.json({ error: 'Pass threadId or all: true' }, { status: 400 });
     }
@@ -93,12 +101,16 @@ export async function POST(request: Request) {
         continue;
       }
       try {
+        const { count: before } = await svc
+          .from('email_messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('thread_id', t.id);
         await importGmailThread(svc, inbox, t.gmail_thread_id);
         const { count } = await svc
           .from('email_messages')
           .select('id', { count: 'exact', head: true })
           .eq('thread_id', t.id);
-        if (count && count > 0) repaired++;
+        if ((count || 0) > (before || 0)) repaired++;
         else failed.push({ threadId: t.id, reason: 'no messages saved' });
       } catch (err: any) {
         console.error('repair: import failed', t.id, err?.message || err);

@@ -151,12 +151,21 @@ async function syncPass(supabase: any, inbox: any, notifiedHistoryId: string) {
     threadIdsToSync = gmailThreads.map((t: any) => t.id).filter(Boolean);
   }
 
+  let anyFailed = false;
   for (const changedThreadId of threadIdsToSync) {
     try {
       await syncThread(supabase, inbox.id, inbox, changedThreadId);
     } catch (err) {
+      anyFailed = true;
       console.error('pubsub: thread sync failed', changedThreadId, err);
     }
+  }
+
+  // If anything failed to save, keep the history pointer where it was so the next
+  // notification re-reads the same changes and retries (saves are idempotent upserts).
+  if (anyFailed) {
+    console.error('pubsub: keeping history pointer for retry', inbox.email_address);
+    return;
   }
 
   // Store the newest historyId we have seen (never move backwards)
@@ -273,7 +282,10 @@ async function insertMessage(
     sent_at: new Date(parseInt(message.internalDate)).toISOString(),
     is_outbound: isOutbound,
   }, { onConflict: 'gmail_message_id', ignoreDuplicates: true }).select().maybeSingle();
-  if (insertErr) console.error('pubsub: message save failed', message.id, insertErr);
+  if (insertErr) {
+    console.error('pubsub: message save failed', message.id, insertErr);
+    throw new Error(`message save failed ${message.id}: ${insertErr.message}`);
+  }
 
   // Save attachments
   if (insertedMessage) {
