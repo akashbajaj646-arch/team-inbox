@@ -537,11 +537,8 @@ export default function ThreadList({
   const views: { key: EmailView; label: string }[] = [
     { key: 'inbox', label: 'Inbox' },
     { key: 'unread', label: 'Unread' },
-    { key: 'starred', label: 'Starred' },
-    { key: 'snoozed', label: 'Snoozed' },
     { key: 'sent', label: 'Sent' },
     { key: 'all', label: 'All mail' },
-    { key: 'trash', label: 'Trash' },
   ];
   const selectedIds = Array.from(selected);
   const allSelected = visibleThreads.length > 0 && visibleThreads.every((t) => selected.has(t.id));
