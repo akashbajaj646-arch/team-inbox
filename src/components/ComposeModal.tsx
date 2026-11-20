@@ -168,6 +168,62 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
     };
   }, [isEmail]);
 
+  // Links: button / Cmd+K opens a small box; selection is saved so it survives the box taking focus
+  const [linkBox, setLinkBox] = useState<string | null>(null);
+  const linkRangeRef = useRef<Range | null>(null);
+
+  function openLinkBox() {
+    const sel = window.getSelection();
+    const editor = editorRef.current;
+    if (sel && sel.rangeCount && editor && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      linkRangeRef.current = sel.getRangeAt(0).cloneRange();
+    } else {
+      linkRangeRef.current = null;
+    }
+    const anchor = linkRangeRef.current?.startContainer.parentElement?.closest('a');
+    setLinkBox(anchor?.getAttribute('href') || '');
+  }
+
+  function applyLink(rawUrl: string) {
+    const editor = editorRef.current;
+    setLinkBox(null);
+    if (!editor) return;
+    editor.focus();
+    const sel = window.getSelection();
+    if (linkRangeRef.current && sel) {
+      sel.removeAllRanges();
+      sel.addRange(linkRangeRef.current);
+    } else if (sel) {
+      const r = document.createRange();
+      r.selectNodeContents(editor);
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
+      document.execCommand('unlink');
+      return;
+    }
+    const url = /^(https?:|mailto:|tel:)/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
+      document.execCommand('createLink', false, url);
+    } else {
+      const safe = url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      document.execCommand('insertHTML', false, `<a href="${safe}">${safe}</a>&nbsp;`);
+    }
+  }
+
+  function handleEditorPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (e.defaultPrevented) return;
+    const text = e.clipboardData.getData('text/plain').trim();
+    if (!/^https?:\/\/\S+$/i.test(text)) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.getRangeAt(0).collapsed) return;
+    e.preventDefault();
+    document.execCommand('createLink', false, text);
+  }
+
   function execCmd(command: string, value?: string) {
     editorRef.current?.focus();
     document.execCommand(command, false, value);
@@ -608,6 +664,42 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
 
                 <div className="w-px h-5 bg-analog-border mx-1" />
 
+                <div className="relative">
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={openLinkBox}
+                    title="Add link (Cmd+K)"
+                    className="w-7 h-7 flex items-center justify-center rounded hover:bg-analog-hover text-analog-text-muted hover:text-analog-text transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    </svg>
+                  </button>
+                  {linkBox !== null && (
+                    <div className="absolute top-full left-0 mt-2 p-2 bg-white border border-analog-border rounded-lg shadow-lg z-20 flex gap-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={linkBox}
+                        onChange={(e) => setLinkBox(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); applyLink(linkBox); }
+                          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setLinkBox(null); editorRef.current?.focus(); }
+                        }}
+                        placeholder="https://..."
+                        className="px-2 py-1 text-sm border border-analog-border rounded w-56 focus:outline-none"
+                      />
+                      <button
+                        onClick={() => applyLink(linkBox)}
+                        className="px-3 py-1 text-sm rounded bg-[#1a73e8] text-white hover:bg-[#1765cc]"
+                      >Add</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="w-px h-5 bg-analog-border mx-1" />
+
                 {/* Attach file */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -642,6 +734,8 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
                   contentEditable
                   suppressContentEditableWarning
                   onInput={checkSkuTrigger}
+                  onPaste={handleEditorPaste}
+                  onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openLinkBox(); } }}
                   onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') checkSkuTrigger(); }}
                   className="w-full min-h-[220px] bg-transparent text-sm text-[#202124] focus:outline-none leading-relaxed"
                   style={{ wordBreak: 'break-word' }}

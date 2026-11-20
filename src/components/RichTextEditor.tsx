@@ -168,7 +168,12 @@ export default function RichTextEditor({
     }
 
     const url = linkUrl.startsWith('http') ? linkUrl : `https://${linkUrl}`;
-    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+    if (editor.state.selection.empty && !editor.isActive('link')) {
+      const safe = url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      editor.chain().focus().insertContent(`<a href="${safe}">${safe}</a> `).run();
+    } else {
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+    }
     setLinkUrl('');
     setShowLinkInput(false);
   }, [editor, linkUrl]);
@@ -392,8 +397,18 @@ export default function RichTextEditor({
         </ToolbarButton>
       </div>
 
-      {/* Editor Content */}
-      <EditorContent editor={editor} />
+      {/* Editor Content (Cmd/Ctrl+K adds a link) */}
+      <div
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            setLinkUrl(editor.getAttributes('link').href || '');
+            setShowLinkInput(true);
+          }
+        }}
+      >
+        <EditorContent editor={editor} />
+      </div>
 
       {/* SKU Picker */}
       {showSkuPicker && (
