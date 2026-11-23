@@ -4,7 +4,7 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '30mb',
     },
-    serverComponentsExternalPackages: ['twilio', 'jsonwebtoken'],
+    serverComponentsExternalPackages: ['twilio', 'jsonwebtoken', 'heic-convert'],
   },
 };
 

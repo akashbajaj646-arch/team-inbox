@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getAttachment, createGmailClient, extractAttachments } from '@/lib/gmail';
+import convert from 'heic-convert';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const BUCKET = 'attachments';
 const CACHE_PREFIX = 'email-cache';
@@ -19,6 +21,31 @@ function respond(buffer: Buffer, mimeType: string, filename: string, inline: boo
       'X-Attachment-Source': source,
     },
   });
+}
+
+// Browsers can't display iPhone HEIC photos, so viewed HEIC images are converted to JPEG once and cached
+function isHeic(mimeType: string, filename: string) {
+  return /hei[cf]/i.test(mimeType || '') || /\.hei[cf]$/i.test(filename || '');
+}
+
+function jpgName(filename: string) {
+  return (filename || 'image').replace(/\.hei[cf]$/i, '') + '.jpg';
+}
+
+async function respondViewable(supabase: any, cachePath: string, buffer: Buffer, mimeType: string, filename: string, inline: boolean, source: string) {
+  if (!inline || !isHeic(mimeType, filename)) return respond(buffer, mimeType, filename, inline, source);
+  try {
+    const out = Buffer.from(await convert({ buffer, format: 'JPEG', quality: 0.85 }));
+    try {
+      await supabase.storage.from(BUCKET).upload(`${cachePath}.jpg`, out, { contentType: 'image/jpeg', upsert: true });
+    } catch (e) {
+      console.error('HEIC jpg cache write failed:', e);
+    }
+    return respond(out, 'image/jpeg', jpgName(filename), true, `${source}+jpg`);
+  } catch (e) {
+    console.error('HEIC convert failed:', e);
+    return respond(buffer, mimeType, filename, inline, source);
+  }
 }
 
 export async function GET(request: Request) {
@@ -46,10 +73,14 @@ export async function GET(request: Request) {
 
     // 1. Fast path: served from our storage cache after the first load
     const cachePath = `${CACHE_PREFIX}/${attachment.id}`;
+    if (inline && isHeic(attachment.mime_type, attachment.filename)) {
+      const { data: jpg } = await supabase.storage.from(BUCKET).download(`${cachePath}.jpg`);
+      if (jpg) return respond(Buffer.from(await jpg.arrayBuffer()), 'image/jpeg', jpgName(attachment.filename), true, 'jpg-cache');
+    }
     const { data: cached } = await supabase.storage.from(BUCKET).download(cachePath);
     if (cached) {
       const buffer = Buffer.from(await cached.arrayBuffer());
-      return respond(buffer, attachment.mime_type, attachment.filename, inline, 'cache');
+      return respondViewable(supabase, cachePath, buffer, attachment.mime_type, attachment.filename, inline, 'cache');
     }
 
     // 2. Slow path: fetch from Gmail. Message and thread lookups run in parallel.
@@ -113,7 +144,7 @@ export async function GET(request: Request) {
       console.error('Attachment cache write failed:', e);
     }
 
-    return respond(buffer, attachment.mime_type, attachment.filename, inline, 'gmail');
+    return respondViewable(supabase, cachePath, buffer, attachment.mime_type, attachment.filename, inline, 'gmail');
   } catch (err) {
     console.error('Attachment download error:', err);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
