@@ -406,10 +406,13 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     updatePresence('viewing');
     loadSignature();
 
+    const followUps: ReturnType<typeof setTimeout>[] = [];
     const messageChannel = supabase
       .channel(`messages:${threadId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'email_messages', filter: `thread_id=eq.${threadId}` }, () => {
         loadMessages();
+        // Attachment rows are saved right after the message, so reload again shortly to pick them up
+        followUps.push(setTimeout(loadMessages, 3000), setTimeout(loadMessages, 10000));
       })
       .subscribe();
 
@@ -422,6 +425,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
     return () => {
       clearPresence();
+      followUps.forEach(clearTimeout);
       supabase.removeChannel(messageChannel);
       supabase.removeChannel(presenceChannel);
     };
@@ -587,7 +591,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
 
     setMessages(data || []);
     if (data && data.length > 0) {
-      await loadAttachmentsForMessages(data.map((m: any) => m.id));
+      await loadAttachmentsForMessages(data.map((m: any) => m.id), data);
     }
     loadTracking();
   }
@@ -610,8 +614,18 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
-  async function loadAttachmentsForMessages(messageIds: string[]) {
+  async function loadAttachmentsForMessages(messageIds: string[], msgs: any[] = []) {
     if (messageIds.length === 0) return;
+    // Content-IDs each message body actually shows (src="cid:...")
+    const referenced: Record<string, Set<string>> = {};
+    const cidRe = /cid:([^"'\s)>]+)/gi;
+    for (const m of msgs) {
+      const set = new Set<string>();
+      let hit: RegExpExecArray | null;
+      cidRe.lastIndex = 0;
+      while ((hit = cidRe.exec(m.body_html || '')) !== null) set.add(hit[1].trim().toLowerCase());
+      referenced[m.id] = set;
+    }
     const { data } = await supabase
       .from('email_attachments')
       .select('id, message_id, filename, mime_type, size, is_inline, content_id')
@@ -630,7 +644,7 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
         if (att.content_id) {
           (cids[att.message_id] ||= {})[att.content_id.trim().toLowerCase()] = att.id;
         }
-        if (att.is_inline) return;
+        if (att.is_inline && att.content_id && referenced[att.message_id]?.has(att.content_id.trim().toLowerCase())) return;
         if (!byMessage[att.message_id]) byMessage[att.message_id] = [];
         byMessage[att.message_id].push(att);
       });
@@ -1309,7 +1323,23 @@ export default function ThreadView({ threadId, currentUser }: ThreadViewProps) {
                             )}
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {msgAttachments.map((att) => (
+                            {msgAttachments.map((att) => att.mime_type?.startsWith('image/') ? (
+                              <a
+                                key={att.id}
+                                href={`/api/gmail/attachment?id=${att.id}&inline=1`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={att.filename}
+                                className="block border border-[#dadce0] rounded-lg overflow-hidden hover:border-[#bdc1c6]"
+                              >
+                                <img
+                                  src={`/api/gmail/attachment?id=${att.id}&inline=1`}
+                                  alt={att.filename}
+                                  loading="lazy"
+                                  className="h-32 w-auto max-w-[260px] object-cover bg-[#f8f9fa]"
+                                />
+                              </a>
+                            ) : (
                               <a
                                 key={att.id}
                                 href={`/api/gmail/attachment?id=${att.id}`}
