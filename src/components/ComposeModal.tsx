@@ -230,6 +230,14 @@ export default function ComposeModal({ inbox, currentUser, onClose, onSent }: Co
   }
 
   function handleTemplateSelect(template: any) {
+    if (!isEmail) {
+      const raw = String(template.body || '');
+      const text = /<[a-z][\s\S]*>/i.test(raw)
+        ? (new DOMParser().parseFromString(raw.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n'), 'text/html').body.textContent || '')
+        : raw;
+      setMessage(text.replace(/\n{3,}/g, '\n\n').trim());
+      return;
+    }
     if (editorRef.current) {
       editorRef.current.innerHTML = template.body;
       editorRef.current.focus();
